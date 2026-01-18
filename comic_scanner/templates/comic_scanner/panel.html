@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Comic Scanner</title>
+</head>
+<body>
+  <div id="comic-panel-root"></div>
+
+  <script>
+    const ctx = window.INVENTREE_PLUGIN_CONTEXT || {};
+    const comic = ctx.data?.comic;
+    const dryMode = ctx.data?.dry_mode;
+
+    if (comic) {
+      showComicModal(comic, dryMode);
+    }
+  </script>
+
+  <script src="/static/plugins/comic_scanner/comic_scanner/comic_ui.js"></script>
+</body>
+</html>
