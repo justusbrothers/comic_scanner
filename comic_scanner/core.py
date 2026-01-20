@@ -23,6 +23,7 @@ class ComicScanner(UserInterfaceMixin, BarcodeMixin, SettingsMixin, InvenTreePlu
     AUTHOR = "Just Us Brothers"
     VERSION = "0.0.1"
 
+    """
     def get_ui_features(self, feature_type=None, context=None, request=None, **kwargs):
         return [
             {
@@ -32,6 +33,7 @@ class ComicScanner(UserInterfaceMixin, BarcodeMixin, SettingsMixin, InvenTreePlu
                 "source": self.plugin_static_file('comic_scanner/comic_ui.js:handleComicScan'),
             }
         ]
+    """
 
     def scan(self, barcode_data):
         logger.info(f"ComicScanner: Starting scan for barcode: {barcode_data}")
