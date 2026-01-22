@@ -113,8 +113,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     const handleLookup = async () => {
       setLoading(true);
       setError(null);
-      setResult(null);
-      setExistingPartPk(null);
+      // Do NOT reset result/existingPartPk here — we want to keep previous data until new lookup finishes
 
       try {
         const response = await context.api.post(
@@ -131,7 +130,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         const comic = payload.comic_data;
         setResult(comic);
 
-        // Reset switches
+        // Reset switches to defaults for new comic
         setIncludeTitle(true);
         setIncludeIPN(true);
         setIncludeDescription(true);
@@ -139,6 +138,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         setIncludeUPC(true);
         setCreateStock(true);
         setInitialQuantity(1);
+        setCreatedOrUpdatedPart(null); // Clear previous success link on new lookup
 
         // Find existing part
         const partRes = await context.api.get('/api/part/', {
@@ -221,6 +221,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     if (!result) return;
 
     setLoading(true);
+    setError(null);
 
     try {
       let partPk = existingPartPk;
@@ -235,10 +236,9 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           ? initialQuantity
           : null;
 
-      if (!partPk) {
-        // ── CREATE NEW PART ────────────────────────────────────────
+      const stockBatch = includeIPN ? result.ipn_proposed : undefined;
 
-        // Always set name (required field) – fallback if title excluded
+      if (!partPk) {
         payload.name = includeTitle
           ? result.title
           : `Comic ${result.ipn_proposed || barcode.slice(-6) || 'Unknown'}`;
@@ -256,11 +256,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           payload.remote_image = result.image_url;
         }
 
-        // Fixed: initial_stock must be object, not array
         if (createStock && safeQuantity !== null) {
           payload.initial_stock = {
             quantity: safeQuantity,
-            // location: stockLocation ?? undefined,   // optional
+            batch: stockBatch,
           };
         }
 
@@ -272,8 +271,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           partPk = createRes.data.pk;
         }
       } else {
-        // ── UPDATE EXISTING PART ───────────────────────────────────
-
         if (!dryRun) {
           const patchPayload: Record<string, any> = {};
 
@@ -290,12 +287,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           }
         }
 
-        // Add new stock item on update
         if (createStock && safeQuantity !== null && !dryRun) {
           await context.api.post('/api/stock/', {
             part: partPk,
             quantity: safeQuantity,
             location: stockLocation ?? undefined,
+            batch: stockBatch,
           });
         }
       }
@@ -329,7 +326,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
-      // Store part for link
+      // Show success + link (keep result visible)
       if (partPk && !dryRun) {
         setCreatedOrUpdatedPart({
           pk: partPk,
@@ -343,6 +340,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           <>
             {result.title}
             {createStock && safeQuantity !== null ? ` (+${safeQuantity} in stock)` : ''}
+            {stockBatch ? ` | Batch/IPN: ${stockBatch}` : ''}
             <br />
             <a
               href={`/part/${partPk}/`}
@@ -356,15 +354,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         ),
         color: 'green',
         icon: <IconCheck />,
-        autoClose: 10000,
+        autoClose: 12000,
       });
-
-      setResult(null);
-      setBarcode('');
-      setExistingPartPk(null);
-      setInitialQuantity(1);
-      setCreateStock(true);
-      // Keep createdOrUpdatedPart visible until manual clear
     } catch (err: any) {
       const apiError = err?.response?.data || err.message;
       setError(typeof apiError === 'object' ? JSON.stringify(apiError, null, 2) : apiError);
@@ -398,9 +389,9 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           leftSection={<IconBarcode />}
         />
         <Button
-          onClick={() => setBarcode(barcodeInput)}
+          onClick={() => setBarcode(barcodeInput.trim())}
           loading={loading}
-          disabled={!barcodeInput.trim()}
+          disabled={!barcodeInput.trim() || loading}
         >
           Lookup
         </Button>
@@ -531,12 +522,19 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             <Button
               variant="outline"
               onClick={() => {
+                // Full reset only on manual Clear
                 setResult(null);
                 setBarcode('');
+                setBarcodeInput('');
                 setExistingPartPk(null);
                 setInitialQuantity(1);
                 setCreateStock(true);
                 setCreatedOrUpdatedPart(null);
+                setIncludeTitle(true);
+                setIncludeIPN(true);
+                setIncludeDescription(true);
+                setIncludeImage(true);
+                setIncludeUPC(true);
               }}
             >
               Clear
