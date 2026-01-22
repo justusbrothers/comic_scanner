@@ -12,7 +12,6 @@ import {
   Title,
   Stack,
   Image,
-  Checkbox,
   Table,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -36,55 +35,40 @@ interface ComicData {
   image_url: string;
 }
 
-type FieldKey =
-  | 'title'
-  | 'ipn_proposed'
-  | 'description'
-  | 'image_url'
-  | 'upc';
-
-const DEFAULT_FIELDS: Record<FieldKey, boolean> = {
-  title: true,
-  ipn_proposed: true,
-  description: true,
-  image_url: true,
-  upc: true,
-};
-
 /* -------------------- Publisher Defaults -------------------- */
 const PUBLISHER_CODES: Record<string, string> = {
-  "Marvel": "MAR",
-  "DC Comics": "DC",
-  "Image Comics": "IMG",
-  "Dark Horse Comics": "DHC",
-  "IDW Publishing": "IDW",
-  "Boom! Studios": "BOOM",
-  "Valiant Entertainment": "VAL",
-  "Archie Comics": "ARCH",
+  Marvel: 'MAR',
+  'DC Comics': 'DC',
+  'Image Comics': 'IMG',
+  'Dark Horse Comics': 'DHC',
+  'IDW Publishing': 'IDW',
+  'Boom! Studios': 'BOOM',
+  'Valiant Entertainment': 'VAL',
+  'Archie Comics': 'ARCH',
 };
 
 const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
-  "ARCH": null,
-  "BOOM": null,
-  "DC": 3,
-  "DHC": 2,
-  "IDW": 24,
-  "IMG": 4,
-  "MAR": 5,
-  "VAL": 23,
-  "VER": 26,
+  ARCH: null,
+  BOOM: null,
+  DC: 3,
+  DHC: 2,
+  IDW: 24,
+  IMG: 4,
+  MAR: 5,
+  VAL: 23,
+  VER: 26,
 };
 
 const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
-  "ARCH": null,
-  "BOOM": null,
-  "DC": 91,
-  "DHC": null,
-  "IDW": null,
-  "IMG": null,
-  "MAR": 92,
-  "VAL": null,
-  "VER": null,
+  ARCH: null,
+  BOOM: null,
+  DC: 91,
+  DHC: null,
+  IDW: null,
+  IMG: null,
+  MAR: 92,
+  VAL: null,
+  VER: null,
 };
 
 const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
@@ -97,12 +81,19 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
 
 function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const [barcode, setBarcode] = useState('');
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [dryRun, setDryRun] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ComicData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [dryRun, setDryRun] = useState(true);
-  const [selectedFields, setSelectedFields] =
-    useState<Record<FieldKey, boolean>>(DEFAULT_FIELDS);
+  const [existingPartPk, setExistingPartPk] = useState<number | null>(null);
+
+  // Individual Switches for each field
+  const [includeTitle, setIncludeTitle] = useState(true);
+  const [includeIPN, setIncludeIPN] = useState(true);
+  const [includeDescription, setIncludeDescription] = useState(true);
+  const [includeImage, setIncludeImage] = useState(true);
+  const [includeUPC, setIncludeUPC] = useState(true);
 
   /* -------------------- Barcode Lookup -------------------- */
   useEffect(() => {
@@ -112,18 +103,39 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       setLoading(true);
       setError(null);
       setResult(null);
+      setExistingPartPk(null);
 
       try {
-        const response = await context.api.post(
-          '/plugin/comic_scanner/comic-lookup/',
-          { barcode }
-        );
-
+        const response = await context.api.post('/plugin/comic_scanner/comic-lookup/', { barcode });
         const payload = response.data;
 
         if (payload?.success && payload?.comic_data) {
           setResult(payload.comic_data);
-          setSelectedFields(DEFAULT_FIELDS);
+
+          // Reset switches
+          setIncludeTitle(true);
+          setIncludeIPN(true);
+          setIncludeDescription(true);
+          setIncludeImage(true);
+          setIncludeUPC(true);
+
+          // Check if part already exists in InvenTree by IPN only
+          const partRes = await context.api.get('/api/part/', {
+            params: { IPN: payload.comic_data.ipn_proposed },
+          });
+
+          if (partRes.data.count > 0) {
+            const locatedIPN = partRes.data.results[0].pk;
+
+            setExistingPartPk(locatedIPN);
+
+            notifications.show({
+              title: 'Success',
+              message: `Found: ${locatedIPN}`,
+              color: 'green',
+              icon: <IconCheck />,
+            });
+          }
 
           notifications.show({
             title: 'Success',
@@ -151,26 +163,27 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   }, [barcode, context.api]);
 
   /* -------------------- Helpers -------------------- */
+  const determinePublisherCode = (publisher: string, barcode: string) => {
+    if (PUBLISHER_CODES[publisher]) return PUBLISHER_CODES[publisher];
+    for (const prefix in PUBLISHER_UPC_PREFIXES) {
+      if (barcode.startsWith(prefix)) return PUBLISHER_UPC_PREFIXES[prefix];
+    }
+    return 'UNK';
+  };
+
+  const determineStockLocation = (pubCode: string) => PUBLISHER_STOCK_LOCATIONS[pubCode] || null;
+  const determineCategory = (pubCode: string) => PUBLISHER_PART_CATEGORIES[pubCode] || 1;
 
   const ensureUpcTemplate = async (): Promise<number> => {
-    const res = await context.api.get(
-      '/api/part/parameter/template/',
-      { params: { name: 'UPC' } }
-    );
+    const res = await context.api.get('/api/part/parameter/template/', { params: { name: 'UPC' } });
+    if (res.data.count > 0) return res.data.results[0].pk;
 
-    if (res.data.count > 0) {
-      return res.data.results[0].pk;
-    }
-
-    const createRes = await context.api.post(
-      '/api/part/parameter/template/',
-      {
-        name: 'UPC',
-        units: 'barcode',
-        description: 'Universal Product Code',
-        data_type: 'string',
-      }
-    );
+    const createRes = await context.api.post('/api/part/parameter/template/', {
+      name: 'UPC',
+      units: 'barcode',
+      description: 'Universal Product Code',
+      data_type: 'string',
+    });
 
     return createRes.data.pk;
   };
@@ -178,115 +191,93 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const uploadImageToPart = async (partPk: number, imageUrl: string) => {
     const imageResponse = await fetch(imageUrl);
     const blob = await imageResponse.blob();
-
     const formData = new FormData();
     formData.append('part', partPk.toString());
     formData.append('image', blob, 'cover.jpg');
-
-    await context.api.post('/api/image/part/', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    await context.api.post('/api/image/part/', formData);
   };
 
-  const determinePublisherCode = (publisher: string, barcode: string) => {
-    if (PUBLISHER_CODES[publisher]) return PUBLISHER_CODES[publisher];
-
-    // fallback to UPC prefix
-    for (const prefix in PUBLISHER_UPC_PREFIXES) {
-      if (barcode.startsWith(prefix)) return PUBLISHER_UPC_PREFIXES[prefix];
-    }
-
-    return 'UNK';
-  };
-
-  const determineStockLocation = (pubCode: string) => {
-    return PUBLISHER_STOCK_LOCATIONS[pubCode] || null;
-  };
-
-  const determineCategory = (pubCode: string) => {
-    return PUBLISHER_PART_CATEGORIES[pubCode] || 1;
-  };
-
-  /* -------------------- Create Flow -------------------- */
-  const handleCreate = async () => {
+  /* -------------------- Create / Update Flow -------------------- */
+  const handleCreateOrUpdate = async () => {
     if (!result) return;
-
-    const pubCode = determinePublisherCode(result.publisher, barcode);
-    const stockLocation = determineStockLocation(pubCode);
-    const category = determineCategory(pubCode);
-
-    if (dryRun) {
-      notifications.show({
-        title: 'Dry Run',
-        message: `Would create: ${result.title}\nIPN: ${result.ipn_proposed}\nCategory: ${category}`,
-        color: 'teal',
-        autoClose: false,
-      });
-      return;
-    }
 
     setLoading(true);
 
     try {
-      const payload: Record<string, any> = {
-        units: 'each',
-        category,
-        active: true,
-        stock_location: stockLocation,
-      };
+      const payload: Record<string, any> = {};
 
-      if (selectedFields.title) payload.name = result.title;
-      if (selectedFields.ipn_proposed) payload.IPN = result.ipn_proposed;
-      if (selectedFields.description)
-        payload.description = result.description;
+      if (includeTitle) payload.name = result.title;
+      if (includeIPN) payload.IPN = result.ipn_proposed;
+      if (includeDescription) payload.description = result.description;
 
-      const createResponse = await context.api.post('/api/part/', payload);
-      const createdPart = createResponse.data;
+      let partPk = existingPartPk;
 
-      /* ---- Image Upload ---- */
-      if (selectedFields.image_url && result.image_url) {
+      if (!partPk) {
+        const pubCode = determinePublisherCode(result.publisher, barcode);
+        const stockLocation = determineStockLocation(pubCode);
+        const category = determineCategory(pubCode);
+
+        Object.assign(payload, {
+          units: 'each',
+          category,
+          active: true,
+          stock_location: stockLocation,
+        });
+
+        if (!dryRun) {
+          const createRes = await context.api.post('/api/part/', payload);
+
+          partPk = createRes.data.pk;
+        }
+      } else {
+        if (!dryRun) {
+          await context.api.patch(`/api/part/${partPk}/`, payload);
+        }
+      }
+
+      if (includeImage && result.image_url && partPk && !dryRun) {
         try {
-          await uploadImageToPart(createdPart.pk, result.image_url);
+          await uploadImageToPart(partPk, result.image_url);
         } catch {
           notifications.show({
             title: 'Image Upload Failed',
-            message: 'Part created, image upload failed',
+            message: 'Could not update part image',
             color: 'yellow',
           });
         }
       }
 
-      /* ---- UPC Parameter ---- */
-      if (selectedFields.upc && barcode) {
+      if (includeUPC && barcode && partPk && !dryRun) {
         try {
           const upcTemplatePk = await ensureUpcTemplate();
           await context.api.post('/api/part/parameter/', {
-            part: createdPart.pk,
+            part: partPk,
             template: upcTemplatePk,
             data: barcode,
           });
         } catch {
           notifications.show({
             title: 'UPC Parameter Failed',
-            message: 'Part created, UPC parameter not saved',
+            message: 'Could not save UPC parameter',
             color: 'yellow',
           });
         }
       }
 
       notifications.show({
-        title: 'Part Created',
-        message: `PK ${createdPart.pk} - ${createdPart.name}`,
+        title: partPk && existingPartPk ? 'Part Updated' : 'Part Created',
+        message: `${result.title}`,
         color: 'green',
         icon: <IconCheck />,
       });
 
       setResult(null);
       setBarcode('');
+      setExistingPartPk(null);
     } catch (err: any) {
-      setError(err?.message || 'Create failed');
+      setError(err?.message || 'Operation failed');
       notifications.show({
-        title: 'Creation Error',
+        title: 'Error',
         message: err?.message,
         color: 'red',
         icon: <IconX />,
@@ -310,14 +301,14 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       <Group grow mt="md">
         <TextInput
           placeholder="Scan UPC..."
-          value={barcode}
-          onChange={(e) => setBarcode(e.currentTarget.value)}
+          value={barcodeInput}
+          onChange={(e) => setBarcodeInput(e.currentTarget.value)}
           leftSection={<IconBarcode />}
         />
         <Button
-          onClick={() => setBarcode(barcode)}
+          onClick={() => setBarcode(barcodeInput)}
           loading={loading}
-          disabled={!barcode.trim()}
+          disabled={!barcodeInput.trim()}
         >
           Lookup
         </Button>
@@ -341,33 +332,46 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {([
-                ['title', 'Title', result.title],
-                ['ipn_proposed', 'IPN', result.ipn_proposed],
-                ['description', 'Description', result.description],
-                ['image_url', 'Cover Image', result.image_url ? 'Yes' : '—'],
-                ['upc', 'UPC', barcode],
-              ] as [FieldKey, string, string][]).map(
-                ([key, label, value]) => (
-                  <Table.Tr key={key}>
-                    <Table.Td>
-                      <Checkbox
-                        checked={selectedFields[key]}
-                        onChange={(e) =>
-                          setSelectedFields((p) => ({
-                            ...p,
-                            [key]: e.currentTarget.checked,
-                          }))
-                        }
-                      />
-                    </Table.Td>
-                    <Table.Td>{label}</Table.Td>
-                    <Table.Td>{value}</Table.Td>
-                  </Table.Tr>
-                )
-              )}
+              <Table.Tr>
+                <Table.Td>
+                  <Switch checked={includeTitle} onChange={(e) => setIncludeTitle(e.currentTarget.checked)} />
+                </Table.Td>
+                <Table.Td>Title</Table.Td>
+                <Table.Td>{result.title}</Table.Td>
+              </Table.Tr>
 
-              {/* Display Category (read-only) */}
+              <Table.Tr>
+                <Table.Td>
+                  <Switch checked={includeIPN} onChange={(e) => setIncludeIPN(e.currentTarget.checked)} />
+                </Table.Td>
+                <Table.Td>IPN</Table.Td>
+                <Table.Td>{result.ipn_proposed}</Table.Td>
+              </Table.Tr>
+
+              <Table.Tr>
+                <Table.Td>
+                  <Switch checked={includeDescription} onChange={(e) => setIncludeDescription(e.currentTarget.checked)} />
+                </Table.Td>
+                <Table.Td>Description</Table.Td>
+                <Table.Td>{result.description}</Table.Td>
+              </Table.Tr>
+
+              <Table.Tr>
+                <Table.Td>
+                  <Switch checked={includeImage} onChange={(e) => setIncludeImage(e.currentTarget.checked)} />
+                </Table.Td>
+                <Table.Td>Cover Image</Table.Td>
+                <Table.Td>{result.image_url ? 'Yes' : '—'}</Table.Td>
+              </Table.Tr>
+
+              <Table.Tr>
+                <Table.Td>
+                  <Switch checked={includeUPC} onChange={(e) => setIncludeUPC(e.currentTarget.checked)} />
+                </Table.Td>
+                <Table.Td>UPC</Table.Td>
+                <Table.Td>{barcode}</Table.Td>
+              </Table.Tr>
+
               <Table.Tr key="category">
                 <Table.Td />
                 <Table.Td>Category</Table.Td>
@@ -390,8 +394,14 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           )}
 
           <Group mt="md">
-            <Button color="green" onClick={handleCreate} loading={loading}>
-              {dryRun ? 'Preview Create' : 'Create Part'}
+            <Button color="green" onClick={handleCreateOrUpdate} loading={loading}>
+              {dryRun
+                ? existingPartPk
+                  ? 'Preview Update'
+                  : 'Preview Create'
+                : existingPartPk
+                ? 'Update Part'
+                : 'Create Part'}
             </Button>
             <Button variant="outline" onClick={() => setResult(null)}>
               Clear
