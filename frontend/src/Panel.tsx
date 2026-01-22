@@ -113,7 +113,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     const handleLookup = async () => {
       setLoading(true);
       setError(null);
-      // Do NOT reset result/existingPartPk here — we want to keep previous data until new lookup finishes
+      // Keep previous result until new lookup succeeds
 
       try {
         const response = await context.api.post(
@@ -130,7 +130,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         const comic = payload.comic_data;
         setResult(comic);
 
-        // Reset switches to defaults for new comic
+        // Reset switches for new comic
         setIncludeTitle(true);
         setIncludeIPN(true);
         setIncludeDescription(true);
@@ -138,7 +138,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         setIncludeUPC(true);
         setCreateStock(true);
         setInitialQuantity(1);
-        setCreatedOrUpdatedPart(null); // Clear previous success link on new lookup
+        setCreatedOrUpdatedPart(null); // Clear previous success link
 
         // Find existing part
         const partRes = await context.api.get('/api/part/', {
@@ -203,17 +203,29 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     PUBLISHER_PART_CATEGORIES[pubCode] || 1;
 
   const ensureUpcTemplate = async (): Promise<number> => {
-    const res = await context.api.get('/api/part/parameter/template/', { params: { name: 'UPC' } });
-    if (res.data.count > 0) return res.data.results[0].pk;
+    try {
+      const res = await context.api.get('/api/part/parameter/template/', {
+        params: { name: 'UPC' },
+      });
 
-    const createRes = await context.api.post('/api/part/parameter/template/', {
-      name: 'UPC',
-      units: 'barcode',
-      description: 'Universal Product Code',
-      data_type: 'string',
-    });
+      if (res.data.count > 0) {
+        return res.data.results[0].pk;
+      }
 
-    return createRes.data.pk;
+      const createRes = await context.api.post('/api/part/parameter/template/', {
+        name: 'UPC',
+        units: 'barcode',
+        description: 'Universal Product Code (barcode)',
+        data_type: 'string',
+        default_value: '',
+        choices: [],
+      });
+
+      return createRes.data.pk;
+    } catch (err: any) {
+      console.error('Failed to ensure UPC template:', err?.response?.data || err);
+      throw err;
+    }
   };
 
   /* -------------------- Create / Update Flow -------------------- */
@@ -239,6 +251,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       const stockBatch = includeIPN ? result.ipn_proposed : undefined;
 
       if (!partPk) {
+        // ── CREATE NEW PART ────────────────────────────────────────
+
         payload.name = includeTitle
           ? result.title
           : `Comic ${result.ipn_proposed || barcode.slice(-6) || 'Unknown'}`;
@@ -260,6 +274,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           payload.initial_stock = {
             quantity: safeQuantity,
             batch: stockBatch,
+            location: stockLocation ?? undefined,     // ← Added: ensures initial stock goes to the right location
           };
         }
 
@@ -271,6 +286,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           partPk = createRes.data.pk;
         }
       } else {
+        // ── UPDATE EXISTING PART ───────────────────────────────────
+
         if (!dryRun) {
           const patchPayload: Record<string, any> = {};
 
@@ -297,36 +314,41 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
-      // Save UPC
+      // Save UPC – improved error handling
       if (includeUPC && barcode && partPk && !dryRun) {
         try {
           const upcTemplatePk = await ensureUpcTemplate();
-          const existingUPC = await context.api.get('/api/part/parameter/', {
+
+          const existingRes = await context.api.get('/api/part/parameter/', {
             params: { part: partPk, template: upcTemplatePk },
           });
 
-          if (existingUPC.data.count > 0) {
-            await context.api.patch(
-              `/api/part/parameter/${existingUPC.data.results[0].pk}/`,
-              { data: barcode }
-            );
+          if (existingRes.data.count > 0) {
+            const paramId = existingRes.data.results[0].pk;
+            await context.api.patch(`/api/part/parameter/${paramId}/`, {
+              data: barcode.trim(),
+            });
           } else {
             await context.api.post('/api/part/parameter/', {
               part: partPk,
               template: upcTemplatePk,
-              data: barcode,
+              data: barcode.trim(),
             });
           }
-        } catch {
+        } catch (upcErr: any) {
+          const detail = upcErr?.response?.data || upcErr.message || 'Unknown UPC error';
           notifications.show({
-            title: 'UPC Parameter Failed',
-            message: 'Could not save UPC parameter',
+            title: 'Could not save UPC',
+            message: typeof detail === 'object'
+              ? (detail?.non_field_errors?.[0] || JSON.stringify(detail))
+              : detail,
             color: 'yellow',
+            autoClose: 8000,
           });
         }
       }
 
-      // Show success + link (keep result visible)
+      // Show success + link (keep form visible)
       if (partPk && !dryRun) {
         setCreatedOrUpdatedPart({
           pk: partPk,
