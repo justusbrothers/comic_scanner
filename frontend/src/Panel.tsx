@@ -13,6 +13,7 @@ import {
   Stack,
   Image,
   Table,
+  NumberInput,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconBarcode, IconCheck, IconX } from '@tabler/icons-react';
@@ -95,6 +96,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const [includeImage, setIncludeImage] = useState(true);
   const [includeUPC, setIncludeUPC] = useState(true);
 
+  // Stock creation controls
+  const [createStock, setCreateStock] = useState(true);
+  const [initialQuantity, setInitialQuantity] = useState<number | ''>(1);
+
   /* -------------------- Barcode Lookup -------------------- */
   useEffect(() => {
     if (!barcode.trim()) return;
@@ -126,8 +131,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         setIncludeDescription(true);
         setIncludeImage(true);
         setIncludeUPC(true);
+        setCreateStock(true);
+        setInitialQuantity(1);
 
-        // -------------------- Find existing part --------------------
+        // Find existing part
         const partRes = await context.api.get('/api/part/', {
           params: { search: comic.ipn_proposed },
         });
@@ -142,7 +149,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
         if (exactMatch) {
           locatedPartPk = exactMatch.pk;
-
           notifications.show({
             title: 'Found in InvenTree',
             message: `Part PK: ${locatedPartPk}`,
@@ -217,10 +223,17 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       if (includeTitle) payload.name = result.title;
       if (includeDescription) payload.description = result.description;
 
+      const pubCode = determinePublisherCode(result.publisher, barcode);
+      const stockLocation = determineStockLocation(pubCode);
+      const category = determineCategory(pubCode);
+
+      const safeQuantity =
+        typeof initialQuantity === 'number' && initialQuantity >= 1
+          ? initialQuantity
+          : null;
+
       if (!partPk) {
-        const pubCode = determinePublisherCode(result.publisher, barcode);
-        const stockLocation = determineStockLocation(pubCode);
-        const category = determineCategory(pubCode);
+        // ── CREATE NEW PART ────────────────────────────────────────
 
         Object.assign(payload, {
           units: 'each',
@@ -229,9 +242,18 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           stock_location: stockLocation,
         });
 
-        // ←—— Added: attach remote image during creation
         if (includeImage && result.image_url) {
           payload.remote_image = result.image_url;
+        }
+
+        // Initial stock on creation (using special field)
+        if (createStock && safeQuantity !== null) {
+          payload.initial_stock = [
+            {
+              quantity: safeQuantity,
+              // location: stockLocation,  // optional override
+            },
+          ];
         }
 
         if (!dryRun) {
@@ -242,11 +264,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           partPk = createRes.data.pk;
         }
       } else {
+        // ── UPDATE EXISTING PART ───────────────────────────────────
+
         if (!dryRun) {
           const patchPayload: Record<string, any> = { ...payload };
           if (includeIPN) patchPayload.IPN = result.ipn_proposed;
 
-          // ←—— Added: update image on existing part if requested
           if (includeImage && result.image_url) {
             patchPayload.remote_image = result.image_url;
           }
@@ -254,6 +277,16 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           if (Object.keys(patchPayload).length > 0) {
             await context.api.patch(`/api/part/${partPk}/`, patchPayload);
           }
+        }
+
+        // Add new stock item(s) on update
+        if (createStock && safeQuantity !== null && !dryRun) {
+          await context.api.post('/api/stock/', {
+            part: partPk,
+            quantity: safeQuantity,
+            location: stockLocation ?? undefined, // use part's default if null
+            // Optional extras: serial, batch, expiry_date, etc.
+          });
         }
       }
 
@@ -287,8 +320,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       }
 
       notifications.show({
-        title: partPk && existingPartPk ? 'Part Updated' : 'Part Created',
-        message: `${result.title}`,
+        title: existingPartPk ? 'Part Updated' : 'Part Created',
+        message: `${result.title}${
+          createStock && safeQuantity !== null
+            ? ` (+${safeQuantity} in stock)`
+            : ''
+        }`,
         color: 'green',
         icon: <IconCheck />,
       });
@@ -296,6 +333,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       setResult(null);
       setBarcode('');
       setExistingPartPk(null);
+      setInitialQuantity(1);
+      setCreateStock(true);
     } catch (err: any) {
       setError(err?.message || 'Operation failed');
       notifications.show({
@@ -358,9 +397,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>
                   <Switch
                     checked={includeTitle}
-                    onChange={(e) =>
-                      setIncludeTitle(e.currentTarget.checked)
-                    }
+                    onChange={(e) => setIncludeTitle(e.currentTarget.checked)}
                   />
                 </Table.Td>
                 <Table.Td>Title</Table.Td>
@@ -371,9 +408,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>
                   <Switch
                     checked={includeIPN}
-                    onChange={(e) =>
-                      setIncludeIPN(e.currentTarget.checked)
-                    }
+                    onChange={(e) => setIncludeIPN(e.currentTarget.checked)}
                   />
                 </Table.Td>
                 <Table.Td>IPN</Table.Td>
@@ -397,9 +432,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>
                   <Switch
                     checked={includeImage}
-                    onChange={(e) =>
-                      setIncludeImage(e.currentTarget.checked)
-                    }
+                    onChange={(e) => setIncludeImage(e.currentTarget.checked)}
                   />
                 </Table.Td>
                 <Table.Td>Cover Image</Table.Td>
@@ -410,9 +443,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 <Table.Td>
                   <Switch
                     checked={includeUPC}
-                    onChange={(e) =>
-                      setIncludeUPC(e.currentTarget.checked)
-                    }
+                    onChange={(e) => setIncludeUPC(e.currentTarget.checked)}
                   />
                 </Table.Td>
                 <Table.Td>UPC</Table.Td>
@@ -431,6 +462,35 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             </Table.Tbody>
           </Table>
 
+          {/* Initial Stock Controls */}
+          <Stack mt="xl" gap="xs">
+            <Title order={5}>Stock Adjustment</Title>
+
+            <Switch
+              label="Add initial stock (new part) or new stock item (existing part)"
+              checked={createStock}
+              onChange={(e) => setCreateStock(e.currentTarget.checked)}
+            />
+
+            {createStock && (
+              <NumberInput
+                label="Quantity to add"
+                min={1}
+                value={initialQuantity}
+                onChange={(value) => setInitialQuantity(value as number | '')}
+                placeholder="e.g. 12"
+                allowDecimal={false}
+                allowNegative={false}
+              />
+            )}
+
+            {createStock && initialQuantity === '' && (
+              <Alert color="yellow" title="Note">
+                Quantity must be at least 1 to add stock.
+              </Alert>
+            )}
+          </Stack>
+
           {result.image_url && (
             <Image
               src={result.image_url}
@@ -443,7 +503,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           )}
 
           <Group mt="md">
-            <Button color="green" onClick={handleCreateOrUpdate} loading={loading}>
+            <Button
+              color="green"
+              onClick={handleCreateOrUpdate}
+              loading={loading}
+              disabled={loading}
+            >
               {dryRun
                 ? existingPartPk
                   ? 'Preview Update'
