@@ -5,94 +5,105 @@ Dry mode: Logs simulated part data without creating anything.
 """
 
 import logging
-import os
-import requests
-from requests.auth import HTTPBasicAuth
 
 from plugin import InvenTreePlugin
-from plugin.mixins import BarcodeMixin, SettingsMixin, UserInterfaceMixin
+from plugin.mixins import SettingsMixin, UrlsMixin, UserInterfaceMixin
 
 logger = logging.getLogger("inventree")
 
 
-class ComicScanner(UserInterfaceMixin, BarcodeMixin, SettingsMixin, InvenTreePlugin):
-    NAME = "ComicScanner"
-    SLUG = "comic_scanner"
-    TITLE = "Comic Scanner (Metron)"
-    DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
+class ComicScanner(
+    SettingsMixin,
+    UrlsMixin,
+    UserInterfaceMixin,
+    InvenTreePlugin
+):
+    ADMIN_SOURCE = "Settings.js:renderPluginSettings"
     AUTHOR = "Just Us Brothers"
+    DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
+    LICENSE = "MIT"
+    NAME = "ComicScanner"
+    PUBLISHER_CODES = {
+        "Marvel": "MAR",
+        "DC Comics": "DC",
+        "Image Comics": "IMG",
+        "Dark Horse Comics": "DHC",
+        "IDW Publishing": "IDW",
+        "Boom! Studios": "BOOM",
+        "Valiant Entertainment": "VAL",
+        "Archie Comics": "ARCH",
+    }
+    PUBLISHER_STOCK_LOCATIONS = {
+        "DC": 91,
+        "MAR": None,
+        "IMG": None,
+        "DHC": None,
+        "IDW": None,
+        "BOOM": None,
+        "VAL": None,
+        "ARCH": None,
+    }
+    PUBLISHER_UPC_PREFIXES = {
+        '759606': 'MAR',
+        '761941': 'DC',
+        '761568': 'DHC',
+        '704': 'IMG',
+        '827': 'IDW',
+    }
+    SETTINGS = {
+        'DRY_RUN': {
+            'name': 'Dry Run Mode (Default)',
+            'description': 'Default state for dry run in panel (can be toggled in UI)',
+            'default': True,
+            'choices': [(True, 'Enabled'), (False, 'Disabled')],
+        },
+    }
+    SLUG = "comic_scanner"
+    TITLE = "Comic Scanner"
     VERSION = "0.0.1"
 
-    """
-    def get_ui_features(self, feature_type=None, context=None, request=None, **kwargs):
+    def setup_urls(self):
+        from django.urls import path
+        from .views import (
+            ComicLookupAPIView,
+            ExampleView,
+        )
+
         return [
-            {
-                "key": "comic_discovery_modal",
-                "feature": "barcode_handler",
-                "title": "Comic Scanner Handler",
-                "source": self.plugin_static_file('comic_scanner/comic_ui.js:handleComicScan'),
-            }
+            path('comic-lookup/', ComicLookupAPIView.as_view(), name='comic-lookup'),
+            # path('plugin/comic_scanner/comic-lookup/', ComicLookupAPIView.as_view(), name='comic-lookup'),
+            path("example/", ExampleView.as_view(), name="example-view"),
         ]
-    """
+
+    def get_ui_panels(self, request, context: dict, **kwargs):
+        panels = []
+
+        if context.get("target_model") in ["part", "part.part"]:
+            panels.append({
+                "description": "Scan comic UPC, lookup metadata, preview or create part",
+                "icon": "ti:barcode",
+                "key": "comic_scanner_panel",
+                "source": self.plugin_static_file("Panel.js:renderComicScannerPanel"),
+                "title": "Comic Scanner",
+            })
+
+        return panels
+
+    def shorten_series_name(self, name: str) -> str:
+        if not name:
+            return "UNKNOWN"
+        name = name.strip().upper()
+        for prefix in [
+            "THE ", "A ", "AN ", "VOL. ", "VOLUME ", "SERIES ", "VOL ", "V ",
+            "(2020)", "(2018)", "(2019)", "(2021)", "(2022)", "(2023)", "(2024)", "(2025)",
+            "/ ", " /", "THE SHADOW / ", "BATMAN / ",
+        ]:
+            name = name.replace(prefix, "")
+        name = "".join(c for c in name if c.isalnum())
+        return name[:20]
 
     def scan(self, barcode_data):
-        logger.info(f"ComicScanner: Starting scan for barcode: {barcode_data}")
-        
-        user = os.environ.get("METRON_USER")
-        password = os.environ.get("METRON_PASS")
-
-        if not user or not password:
-            logger.error("ComicScanner: METRON_USER or METRON_PASS not found in environment.")
-            return {"error": "Metron credentials missing"}
-
-        params = {"upc": barcode_data}
-        url = "https://metron.cloud/api/issue/"
-        headers = {"Accept": "application/json"}
-
-        try:
-            logger.debug(f"ComicScanner: Querying Metron API at {url}")
-            response = requests.get(
-                url,
-                params=params,
-                auth=HTTPBasicAuth(user, password),
-                headers=headers,
-                timeout=5,
-            )
-            
-            logger.debug(f"ComicScanner: Metron Response Code: {response.status_code}")
-
-            if response.status_code == 404:
-                logger.warning(f"ComicScanner: No comic found for UPC {barcode_data}")
-                return None
-
-            data = response.json()
-        except Exception as e:
-            logger.exception("ComicScanner: Metron connection error")
-            return {"error": str(e)}
-
-        results = data.get("results", [])
-        if not results:
-            logger.info(f"ComicScanner: API returned 0 results for UPC {barcode_data}")
-            return None
-
-        issue = results[0]
-        series = issue.get("series", {}).get("name", "Unknown Series")
-        number = issue.get("number", "?")
-        
-        logger.info(f"ComicScanner: Successfully matched {series} #{number}")
-
-        payload = {
-            "success": f"Found: {series} #{number}",
-            "action": "create_part",
-            "part_data": {
-                "name": f"{series} #{number}",
-                "description": issue.get("description", "No description found."),
-                "IPN": f"COMIC-{barcode_data}",
-                "revision": number,
-                "link": f"https://metron.cloud{issue.get('id')}/",
-                "image": issue.get("image", ""),
-            }
+        return {
+            "success": True,
+            "message": "Use the Comic Scanner panel on part pages for full functionality.",
         }
-        
-        logger.debug(f"ComicScanner: Returning payload: {payload}")
-        return payload
