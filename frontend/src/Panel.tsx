@@ -204,15 +204,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     return createRes.data.pk;
   };
 
-  const uploadImageToPart = async (partPk: number, imageUrl: string) => {
-    const imageResponse = await fetch(imageUrl);
-    const blob = await imageResponse.blob();
-    const formData = new FormData();
-    formData.append('part', partPk.toString());
-    formData.append('image', blob, 'cover.jpg');
-    await context.api.post('/api/image/part/', formData);
-  };
-
   /* -------------------- Create / Update Flow -------------------- */
   const handleCreateOrUpdate = async () => {
     if (!result) return;
@@ -238,6 +229,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           stock_location: stockLocation,
         });
 
+        // ←—— Added: attach remote image during creation
+        if (includeImage && result.image_url) {
+          payload.remote_image = result.image_url;
+        }
+
         if (!dryRun) {
           const createRes = await context.api.post('/api/part/', {
             ...payload,
@@ -250,22 +246,14 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           const patchPayload: Record<string, any> = { ...payload };
           if (includeIPN) patchPayload.IPN = result.ipn_proposed;
 
+          // ←—— Added: update image on existing part if requested
+          if (includeImage && result.image_url) {
+            patchPayload.remote_image = result.image_url;
+          }
+
           if (Object.keys(patchPayload).length > 0) {
             await context.api.patch(`/api/part/${partPk}/`, patchPayload);
           }
-        }
-      }
-
-      // Upload image
-      if (includeImage && result.image_url && partPk && !dryRun) {
-        try {
-          await uploadImageToPart(partPk, result.image_url);
-        } catch {
-          notifications.show({
-            title: 'Image Upload Failed',
-            message: 'Could not update part image',
-            color: 'yellow',
-          });
         }
       }
 
