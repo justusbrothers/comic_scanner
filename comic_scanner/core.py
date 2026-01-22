@@ -44,7 +44,6 @@ class ComicScanner(
 
         return [
             path('comic-lookup/', ComicLookupAPIView.as_view(), name='comic-lookup'),
-            # path('plugin/comic_scanner/comic-lookup/', ComicLookupAPIView.as_view(), name='comic-lookup'),
             path("example/", ExampleView.as_view(), name="example-view"),
         ]
 

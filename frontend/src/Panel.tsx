@@ -415,5 +415,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
 export function renderComicScannerPanel(context: InvenTreePluginContext) {
   checkPluginVersion(context);
+
   return <ComicScannerPanel context={context} />;
 }
