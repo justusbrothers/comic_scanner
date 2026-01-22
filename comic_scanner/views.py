@@ -158,7 +158,7 @@ class ComicLookupAPIView(APIView):
         if not pub_code:
             pub_code = "UNK"
 
-        series_short = shorten_series_name(series_name)
+        series_short = self.shorten_series_name(series_name)
 
         try:
             num_clean = "".join(c for c in str(issue_number) if c.isdigit())
