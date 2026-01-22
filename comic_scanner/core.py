@@ -23,33 +23,6 @@ class ComicScanner(
     DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
     LICENSE = "MIT"
     NAME = "ComicScanner"
-    PUBLISHER_CODES = {
-        "Marvel": "MAR",
-        "DC Comics": "DC",
-        "Image Comics": "IMG",
-        "Dark Horse Comics": "DHC",
-        "IDW Publishing": "IDW",
-        "Boom! Studios": "BOOM",
-        "Valiant Entertainment": "VAL",
-        "Archie Comics": "ARCH",
-    }
-    PUBLISHER_STOCK_LOCATIONS = {
-        "DC": 91,
-        "MAR": None,
-        "IMG": None,
-        "DHC": None,
-        "IDW": None,
-        "BOOM": None,
-        "VAL": None,
-        "ARCH": None,
-    }
-    PUBLISHER_UPC_PREFIXES = {
-        '759606': 'MAR',
-        '761941': 'DC',
-        '761568': 'DHC',
-        '704': 'IMG',
-        '827': 'IDW',
-    }
     SETTINGS = {
         'DRY_RUN': {
             'name': 'Dry Run Mode (Default)',

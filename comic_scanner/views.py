@@ -54,7 +54,7 @@ class ComicLookupAPIView(APIView):
         "761941": "DC",
     }
 
-    def shorten_series_name(self, name, max_len=20):
+    def shorten_series_name(self, name, max_len=14):
         return "".join(
             c for c in name.upper()
             if c.isalnum()
@@ -171,7 +171,7 @@ class ComicLookupAPIView(APIView):
 
         ipn = f"CB_{pub_code}_{series_short}-{issue_padded}"
         if volume and str(volume) != "1":
-            ipn = f"CB_{pub_code}_V{volume}_{series_short}-{issue_padded}"
+            ipn = f"CB_{pub_code}_{series_short}_V{volume}-{issue_padded}"
 
         display_name = series_name
         if volume and str(volume) != "1":
