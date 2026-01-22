@@ -106,46 +106,59 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       setExistingPartPk(null);
 
       try {
-        const response = await context.api.post('/plugin/comic_scanner/comic-lookup/', { barcode });
+        const response = await context.api.post(
+          '/plugin/comic_scanner/comic-lookup/',
+          { barcode }
+        );
+
         const payload = response.data;
 
-        if (payload?.success && payload?.comic_data) {
-          setResult(payload.comic_data);
+        if (!payload?.success || !payload?.comic_data) {
+          throw new Error(payload?.message || 'Invalid response from Metron');
+        }
 
-          // Reset switches
-          setIncludeTitle(true);
-          setIncludeIPN(true);
-          setIncludeDescription(true);
-          setIncludeImage(true);
-          setIncludeUPC(true);
+        const comic = payload.comic_data;
+        setResult(comic);
 
-          // Check if part already exists in InvenTree by IPN only
-          const partRes = await context.api.get('/api/part/', {
-            params: { IPN: payload.comic_data.ipn_proposed },
-          });
+        // Reset switches
+        setIncludeTitle(true);
+        setIncludeIPN(true);
+        setIncludeDescription(true);
+        setIncludeImage(true);
+        setIncludeUPC(true);
 
-          if (partRes.data.count > 0) {
-            const locatedIPN = partRes.data.results[0].pk;
+        // -------------------- Find existing part --------------------
+        const partRes = await context.api.get('/api/part/', {
+          params: { search: comic.ipn_proposed },
+        });
 
-            setExistingPartPk(locatedIPN);
+        let locatedPartPk: number | null = null;
 
-            notifications.show({
-              title: 'Success',
-              message: `Found: ${locatedIPN}`,
-              color: 'green',
-              icon: <IconCheck />,
-            });
-          }
+        const parts = Array.isArray(partRes.data) ? partRes.data : [];
+
+        const exactMatch = parts.find(
+          (p: any) => p.IPN?.trim() === comic.ipn_proposed
+        );
+
+        if (exactMatch) {
+          locatedPartPk = exactMatch.pk;
 
           notifications.show({
-            title: 'Success',
-            message: `Found: ${payload.comic_data.title}`,
+            title: 'Found in InvenTree',
+            message: `Part PK: ${locatedPartPk}`,
             color: 'green',
             icon: <IconCheck />,
           });
-        } else {
-          throw new Error(payload?.message || 'Invalid response');
         }
+
+        setExistingPartPk(locatedPartPk);
+
+        notifications.show({
+          title: 'Found on Metron',
+          message: comic.title,
+          color: 'green',
+          icon: <IconCheck />,
+        });
       } catch (err: any) {
         setError(err?.message || 'Lookup failed');
         notifications.show({
