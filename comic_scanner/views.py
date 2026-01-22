@@ -131,9 +131,7 @@ class ComicLookupAPIView(APIView):
         series_name = series_dict.get("name", "Unknown Series").strip()
         volume = series_dict.get("volume")
         issue_number = issue.get("number", "?")
-        desc = issue.get("desc") or issue.get(
-            "description", "No description available."
-        )
+        desc = issue.get("desc") or issue.get("description", "")
         image_url = issue.get("image", "")
         variant_name = issue.get("variant", "") or issue.get("cover", "")
         metron_id = issue.get("id")
@@ -160,7 +158,7 @@ class ComicLookupAPIView(APIView):
         if not pub_code:
             pub_code = "UNK"
 
-        series_short = self.shorten_series_name(series_name)
+        series_short = shorten_series_name(series_name)
 
         try:
             num_clean = "".join(c for c in str(issue_number) if c.isdigit())

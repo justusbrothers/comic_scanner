@@ -184,8 +184,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     return 'UNK';
   };
 
-  const determineStockLocation = (pubCode: string) => PUBLISHER_STOCK_LOCATIONS[pubCode] || null;
-  const determineCategory = (pubCode: string) => PUBLISHER_PART_CATEGORIES[pubCode] || 1;
+  const determineStockLocation = (pubCode: string) =>
+    PUBLISHER_STOCK_LOCATIONS[pubCode] || null;
+
+  const determineCategory = (pubCode: string) =>
+    PUBLISHER_PART_CATEGORIES[pubCode] || 1;
 
   const ensureUpcTemplate = async (): Promise<number> => {
     const res = await context.api.get('/api/part/parameter/template/', { params: { name: 'UPC' } });
@@ -217,13 +220,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     setLoading(true);
 
     try {
+      let partPk = existingPartPk;
       const payload: Record<string, any> = {};
 
       if (includeTitle) payload.name = result.title;
-      if (includeIPN) payload.IPN = result.ipn_proposed;
       if (includeDescription) payload.description = result.description;
-
-      let partPk = existingPartPk;
 
       if (!partPk) {
         const pubCode = determinePublisherCode(result.publisher, barcode);
@@ -238,16 +239,24 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         });
 
         if (!dryRun) {
-          const createRes = await context.api.post('/api/part/', payload);
-
+          const createRes = await context.api.post('/api/part/', {
+            ...payload,
+            IPN: includeIPN ? result.ipn_proposed : undefined,
+          });
           partPk = createRes.data.pk;
         }
       } else {
         if (!dryRun) {
-          await context.api.patch(`/api/part/${partPk}/`, payload);
+          const patchPayload: Record<string, any> = { ...payload };
+          if (includeIPN) patchPayload.IPN = result.ipn_proposed;
+
+          if (Object.keys(patchPayload).length > 0) {
+            await context.api.patch(`/api/part/${partPk}/`, patchPayload);
+          }
         }
       }
 
+      // Upload image
       if (includeImage && result.image_url && partPk && !dryRun) {
         try {
           await uploadImageToPart(partPk, result.image_url);
@@ -260,14 +269,26 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
+      // Save UPC
       if (includeUPC && barcode && partPk && !dryRun) {
         try {
           const upcTemplatePk = await ensureUpcTemplate();
-          await context.api.post('/api/part/parameter/', {
-            part: partPk,
-            template: upcTemplatePk,
-            data: barcode,
+          const existingUPC = await context.api.get('/api/part/parameter/', {
+            params: { part: partPk, template: upcTemplatePk },
           });
+
+          if (existingUPC.data.count > 0) {
+            await context.api.patch(
+              `/api/part/parameter/${existingUPC.data.results[0].pk}/`,
+              { data: barcode }
+            );
+          } else {
+            await context.api.post('/api/part/parameter/', {
+              part: partPk,
+              template: upcTemplatePk,
+              data: barcode,
+            });
+          }
         } catch {
           notifications.show({
             title: 'UPC Parameter Failed',
@@ -347,7 +368,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             <Table.Tbody>
               <Table.Tr>
                 <Table.Td>
-                  <Switch checked={includeTitle} onChange={(e) => setIncludeTitle(e.currentTarget.checked)} />
+                  <Switch
+                    checked={includeTitle}
+                    onChange={(e) =>
+                      setIncludeTitle(e.currentTarget.checked)
+                    }
+                  />
                 </Table.Td>
                 <Table.Td>Title</Table.Td>
                 <Table.Td>{result.title}</Table.Td>
@@ -355,7 +381,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
               <Table.Tr>
                 <Table.Td>
-                  <Switch checked={includeIPN} onChange={(e) => setIncludeIPN(e.currentTarget.checked)} />
+                  <Switch
+                    checked={includeIPN}
+                    onChange={(e) =>
+                      setIncludeIPN(e.currentTarget.checked)
+                    }
+                  />
                 </Table.Td>
                 <Table.Td>IPN</Table.Td>
                 <Table.Td>{result.ipn_proposed}</Table.Td>
@@ -363,7 +394,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
               <Table.Tr>
                 <Table.Td>
-                  <Switch checked={includeDescription} onChange={(e) => setIncludeDescription(e.currentTarget.checked)} />
+                  <Switch
+                    checked={includeDescription}
+                    onChange={(e) =>
+                      setIncludeDescription(e.currentTarget.checked)
+                    }
+                  />
                 </Table.Td>
                 <Table.Td>Description</Table.Td>
                 <Table.Td>{result.description}</Table.Td>
@@ -371,7 +407,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
               <Table.Tr>
                 <Table.Td>
-                  <Switch checked={includeImage} onChange={(e) => setIncludeImage(e.currentTarget.checked)} />
+                  <Switch
+                    checked={includeImage}
+                    onChange={(e) =>
+                      setIncludeImage(e.currentTarget.checked)
+                    }
+                  />
                 </Table.Td>
                 <Table.Td>Cover Image</Table.Td>
                 <Table.Td>{result.image_url ? 'Yes' : '—'}</Table.Td>
@@ -379,17 +420,24 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
               <Table.Tr>
                 <Table.Td>
-                  <Switch checked={includeUPC} onChange={(e) => setIncludeUPC(e.currentTarget.checked)} />
+                  <Switch
+                    checked={includeUPC}
+                    onChange={(e) =>
+                      setIncludeUPC(e.currentTarget.checked)
+                    }
+                  />
                 </Table.Td>
                 <Table.Td>UPC</Table.Td>
                 <Table.Td>{barcode}</Table.Td>
               </Table.Tr>
 
-              <Table.Tr key="category">
+              <Table.Tr>
                 <Table.Td />
                 <Table.Td>Category</Table.Td>
                 <Table.Td>
-                  {determineCategory(determinePublisherCode(result.publisher, barcode))}
+                  {determineCategory(
+                    determinePublisherCode(result.publisher, barcode)
+                  )}
                 </Table.Td>
               </Table.Tr>
             </Table.Tbody>
