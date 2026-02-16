@@ -74,11 +74,15 @@ const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
 
 const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '761941': 'DC',
+  '070989': 'DC',
   '761568': 'DHC',
   '827': 'IDW',
   '704': 'IMG',
   '759606': 'MAR',
 };
+
+// Cache for UPC template PK (persists across renders in the same component instance)
+let upcTemplatePkCache: number | null = null;
 
 function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const [barcode, setBarcode] = useState('');
@@ -106,6 +110,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     name: string;
   } | null>(null);
 
+  // Utility to clean barcode input (remove spaces, hyphens, etc.)
+  const cleanBarcode = (input: string): string => {
+    return input.replace(/[^0-9]/g, ''); // Keep only digits
+  };
+
   /* -------------------- Barcode Lookup -------------------- */
   useEffect(() => {
     if (!barcode.trim()) return;
@@ -118,7 +127,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       try {
         const response = await context.api.post(
           '/plugin/comic_scanner/comic-lookup/',
-          { barcode }
+          { barcode: cleanBarcode(barcode) }
         );
 
         const payload = response.data;
@@ -138,7 +147,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         setIncludeUPC(true);
         setCreateStock(true);
         setInitialQuantity(1);
-        setCreatedOrUpdatedPart(null); // Clear previous success link
+        setCreatedOrUpdatedPart(null);
 
         // Find existing part
         const partRes = await context.api.get('/api/part/', {
@@ -190,7 +199,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   /* -------------------- Helpers -------------------- */
   const determinePublisherCode = (publisher: string, barcode: string) => {
     if (PUBLISHER_CODES[publisher]) return PUBLISHER_CODES[publisher];
-    for (const prefix in PUBLISHER_UPC_PREFIXES) {
+    const sortedPrefixes = Object.keys(PUBLISHER_UPC_PREFIXES).sort((a, b) => b.length - a.length);
+    for (const prefix of sortedPrefixes) {
       if (barcode.startsWith(prefix)) return PUBLISHER_UPC_PREFIXES[prefix];
     }
     return 'UNK';
@@ -203,27 +213,48 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     PUBLISHER_PART_CATEGORIES[pubCode] || 1;
 
   const ensureUpcTemplate = async (): Promise<number> => {
+    console.log("[UPC TEMPLATE] Using modern version without units/choices - 2026");
+
+    if (upcTemplatePkCache !== null) {
+      console.log("[UPC TEMPLATE] Cache hit:", upcTemplatePkCache);
+      return upcTemplatePkCache!;
+    }
+
     try {
+      console.log("[UPC TEMPLATE] GET checking for UPC template...");
       const res = await context.api.get('/api/part/parameter/template/', {
         params: { name: 'UPC' },
+        headers: {
+          Accept: 'application/json',
+        },
       });
 
+      console.log("[UPC TEMPLATE] Response status:", res.status);
+      console.log("[UPC TEMPLATE] Content-Type:", res.headers['content-type']);
+      console.log("[UPC TEMPLATE] Data preview:", typeof res.data === 'string' 
+        ? res.data.substring(0, 300)
+        : JSON.stringify(res.data, null, 2));
+      console.log("[UPC TEMPLATE] GET count:", res.data.count);
+
       if (res.data.count > 0) {
-        return res.data.results[0].pk;
+        upcTemplatePkCache = res.data.results[0].pk;
+        console.log("[UPC TEMPLATE] Found existing, PK:", upcTemplatePkCache);
+        return upcTemplatePkCache!;
       }
 
+      console.log("[UPC TEMPLATE] Creating new UPC template (no units/choices sent)");
       const createRes = await context.api.post('/api/part/parameter/template/', {
         name: 'UPC',
-        units: 'barcode',
         description: 'Universal Product Code (barcode)',
         data_type: 'string',
         default_value: '',
-        choices: [],
       });
 
-      return createRes.data.pk;
+      upcTemplatePkCache = createRes.data.pk;
+      console.log("[UPC TEMPLATE] Created, PK:", upcTemplatePkCache);
+      return upcTemplatePkCache!;
     } catch (err: any) {
-      console.error('Failed to ensure UPC template:', err?.response?.data || err);
+      console.error("[UPC TEMPLATE] Failed:", err?.response?.data || err);
       throw err;
     }
   };
@@ -274,7 +305,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           payload.initial_stock = {
             quantity: safeQuantity,
             batch: stockBatch,
-            location: stockLocation ?? undefined,     // ← Added: ensures initial stock goes to the right location
+            location: stockLocation ?? undefined,
           };
         }
 
@@ -405,13 +436,13 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
       <Group grow mt="md">
         <TextInput
-          placeholder="Scan UPC..."
+          placeholder="Scan UPC... (spaces or hyphens OK)"
           value={barcodeInput}
           onChange={(e) => setBarcodeInput(e.currentTarget.value)}
           leftSection={<IconBarcode />}
         />
         <Button
-          onClick={() => setBarcode(barcodeInput.trim())}
+          onClick={() => setBarcode(cleanBarcode(barcodeInput.trim()))}
           loading={loading}
           disabled={!barcodeInput.trim() || loading}
         >
@@ -544,7 +575,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             <Button
               variant="outline"
               onClick={() => {
-                // Full reset only on manual Clear
                 setResult(null);
                 setBarcode('');
                 setBarcodeInput('');

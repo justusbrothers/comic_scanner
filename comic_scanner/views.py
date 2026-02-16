@@ -65,6 +65,9 @@ class ComicLookupAPIView(APIView):
         user = os.environ.get("METRON_USER")
         password = os.environ.get("METRON_PASS")
 
+        if barcode:
+            barcode = ''.join(c for c in str(barcode) if c.isdigit())
+
         logger.info("ComicLookupAPIView: Processing barcode %s", barcode)
 
         if not barcode:
