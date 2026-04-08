@@ -1,22 +1,31 @@
 import {
   checkPluginVersion,
-  type InvenTreePluginContext,
+  type InvenTreePluginContext
 } from '@inventreedb/ui';
 import {
   Alert,
   Button,
   Group,
-  Loader,
-  Switch,
-  TextInput,
-  Title,
-  Stack,
   Image,
-  Table,
+  Loader,
   NumberInput,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  Textarea,
+  TextInput,
+  Title
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBarcode, IconCheck, IconX, IconExternalLink } from '@tabler/icons-react';
+import {
+  IconBarcode,
+  IconCheck,
+  IconExternalLink,
+  IconSearch,
+  IconX
+} from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
 interface ComicData {
@@ -34,18 +43,59 @@ interface ComicData {
   metron_url: string;
   metron_id: number | null;
   image_url: string;
+  part_link: string;
+  default_category?: number;
+  listed_on_whatnot: boolean;
+  whatnot_price: string;
+}
+
+interface Variant {
+  metron_id: number;
+  variant: string;
+  display_name: string;
+  image_url: string;
+  description: string;
+  cover_date: string;
+  store_date: string;
+  upc: string | null;
+  is_scanned_match: boolean;
+}
+
+interface LookupResponse {
+  success: boolean;
+  comic_data: ComicData;
+  variants: Variant[];
+  scanned_barcode: string;
+  message?: string;
 }
 
 /* -------------------- Publisher Defaults -------------------- */
 const PUBLISHER_CODES: Record<string, string> = {
-  Marvel: 'MAR',
-  'DC Comics': 'DC',
-  'Image Comics': 'IMG',
-  'Dark Horse Comics': 'DHC',
-  'IDW Publishing': 'IDW',
-  'Boom! Studios': 'BOOM',
-  'Valiant Entertainment': 'VAL',
   'Archie Comics': 'ARCH',
+  'Boom! Studios': 'BOOM',
+  'Dark Horse Comics': 'DHC',
+  'DC Comics': 'DC',
+  'IDW Publishing': 'IDW',
+  'Image Comics': 'IMG',
+  'Mad Cave Comics': 'MAD',
+  Marvel: 'MAR',
+  'Valiant Entertainment': 'VAL'
+};
+
+const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
+  '070989': 'DC',
+  '071486': 'MAR',
+  '59606': 'MAR',
+  '60196': 'MAD',
+  '65946': '???',
+  '704': 'IMG',
+  '709': 'IMG',
+  '70985': 'IMG',
+  '72513': 'DYN',
+  '759606': 'MAR',
+  '761568': 'DHC',
+  '761941': 'DC',
+  '827': 'IDW'
 };
 
 const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
@@ -53,11 +103,13 @@ const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
   BOOM: null,
   DC: 3,
   DHC: 2,
+  DYN: 105,
   IDW: 24,
   IMG: 4,
+  MAD: 108,
   MAR: 5,
   VAL: 23,
-  VER: 26,
+  VER: 26
 };
 
 const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
@@ -65,141 +117,253 @@ const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
   BOOM: null,
   DC: 91,
   DHC: null,
+  DYN: 94,
   IDW: null,
-  IMG: null,
+  IMG: 70,
+  MAD: 98,
   MAR: 92,
   VAL: null,
-  VER: null,
+  VER: null
 };
 
-const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
-  '761941': 'DC',
-  '070989': 'DC',
-  '761568': 'DHC',
-  '827': 'IDW',
-  '704': 'IMG',
-  '759606': 'MAR',
+const COMIC_CONDITIONS = [
+  { value: 'Near Mint', label: 'Near Mint (NM)' },
+  { value: 'Very Fine', label: 'Very Fine (VF)' },
+  { value: 'Fine', label: 'Fine (FN)' },
+  { value: 'Very Good', label: 'Very Good (VG)' },
+  { value: 'Good', label: 'Good (GD)' },
+  { value: 'Fair', label: 'Fair (FR)' },
+  { value: 'Poor', label: 'Poor (PR)' },
+  { value: 'Raw', label: 'Raw (Ungraded)' }
+];
+
+/** Truncate text to max length, adding "..." if it was shortened */
+const truncateDescription = (text: string, maxLength: number = 250): string => {
+  if (!text) return '';
+
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+
+  // Truncate and add ellipsis
+  return trimmed.substring(0, maxLength - 3) + '...';
 };
 
-// Cache for UPC template PK (persists across renders in the same component instance)
 let upcTemplatePkCache: number | null = null;
 
 function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
-  const [barcode, setBarcode] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
-  const [dryRun, setDryRun] = useState(true);
+  const [metronIdInput, setMetronIdInput] = useState('');
+  const [queryInput, setQueryInput] = useState('');
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ComicData | null>(null);
+  const [lookupResult, setLookupResult] = useState<{
+    defaultComic: ComicData;
+    variants: Variant[];
+    scannedBarcode: string;
+  } | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
   const [existingPartPk, setExistingPartPk] = useState<number | null>(null);
 
-  // Individual Switches for each field
+  // Editable fields
+  const [editedData, setEditedData] = useState<Partial<ComicData>>({});
+  const [editedUPC, setEditedUPC] = useState<string>('');
+
+  // WhatNot fields
+  const [listedOnWhatnot, setListedOnWhatnot] = useState(false);
+  const [whatnotAuctionPrice, setWhatnotAuctionPrice] = useState('');
+
+  // New Condition field
+  const [selectedCondition, setSelectedCondition] =
+    useState<string>('Near Mint');
+
+  // Selected Part Category
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+
+  // Switches
   const [includeTitle, setIncludeTitle] = useState(true);
   const [includeIPN, setIncludeIPN] = useState(true);
   const [includeDescription, setIncludeDescription] = useState(true);
   const [includeImage, setIncludeImage] = useState(true);
   const [includeUPC, setIncludeUPC] = useState(true);
 
-  // Stock creation controls
+  // Stock
   const [createStock, setCreateStock] = useState(true);
   const [initialQuantity, setInitialQuantity] = useState<number | ''>(1);
 
-  // Track recently created/updated part for linking
   const [createdOrUpdatedPart, setCreatedOrUpdatedPart] = useState<{
     pk: number;
     name: string;
   } | null>(null);
 
-  // Utility to clean barcode input (remove spaces, hyphens, etc.)
   const cleanBarcode = (input: string): string => {
-    return input.replace(/[^0-9]/g, ''); // Keep only digits
+    return input.replace(/[^0-9]/g, '');
   };
 
-  /* -------------------- Barcode Lookup -------------------- */
-  useEffect(() => {
-    if (!barcode.trim()) return;
+  /** Generate variant-aware IPN (e.g. CB_MAR_Batman-001-COVERA) */
+  const getVariantIpn = (baseIpn: string, variantName: string): string => {
+    if (
+      !variantName ||
+      ['standard', 'none', ''].includes(variantName.toLowerCase())
+    ) {
+      return baseIpn;
+    }
+    const suffix = variantName
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 8);
+    return `${baseIpn}-${suffix}`;
+  };
 
-    const handleLookup = async () => {
-      setLoading(true);
-      setError(null);
-      // Keep previous result until new lookup succeeds
+  const handleLookupClick = async () => {
+    const cleanedBarcode = cleanBarcode(barcodeInput.trim());
+    const metronId = metronIdInput.trim();
+    const searchQuery = queryInput.trim();
 
-      try {
-        const response = await context.api.post(
-          '/plugin/comic_scanner/comic-lookup/',
-          { barcode: cleanBarcode(barcode) }
-        );
+    if (!cleanedBarcode && !metronId && !searchQuery) {
+      notifications.show({
+        title: 'Input required',
+        message: 'Enter a UPC barcode, Metron issue ID, or search query',
+        color: 'yellow'
+      });
+      return;
+    }
 
-        const payload = response.data;
+    setLoading(true);
+    setError(null);
+    setLookupResult(null);
+    setSelectedVariant(null);
+    setExistingPartPk(null);
+    setCreatedOrUpdatedPart(null);
+    setEditedData({});
+    setEditedUPC('');
+    setListedOnWhatnot(false);
+    setWhatnotAuctionPrice('');
+    setSelectedCondition('Near Mint');
+    setSelectedCategory(null);
 
-        if (!payload?.success || !payload?.comic_data) {
-          throw new Error(payload?.message || 'Invalid response from Metron');
-        }
+    try {
+      const payload: any = {};
 
-        const comic = payload.comic_data;
-        setResult(comic);
-
-        // Reset switches for new comic
-        setIncludeTitle(true);
-        setIncludeIPN(true);
-        setIncludeDescription(true);
-        setIncludeImage(true);
-        setIncludeUPC(true);
-        setCreateStock(true);
-        setInitialQuantity(1);
-        setCreatedOrUpdatedPart(null);
-
-        // Find existing part
-        const partRes = await context.api.get('/api/part/', {
-          params: { search: comic.ipn_proposed },
-        });
-
-        let locatedPartPk: number | null = null;
-
-        const parts = Array.isArray(partRes.data) ? partRes.data : [];
-
-        const exactMatch = parts.find(
-          (p: any) => p.IPN?.trim() === comic.ipn_proposed
-        );
-
-        if (exactMatch) {
-          locatedPartPk = exactMatch.pk;
-          notifications.show({
-            title: 'Found in InvenTree',
-            message: `Part PK: ${locatedPartPk}`,
-            color: 'green',
-            icon: <IconCheck />,
-          });
-        }
-
-        setExistingPartPk(locatedPartPk);
-
-        notifications.show({
-          title: 'Found on Metron',
-          message: comic.title,
-          color: 'green',
-          icon: <IconCheck />,
-        });
-      } catch (err: any) {
-        setError(err?.message || 'Lookup failed');
-        notifications.show({
-          title: 'Error',
-          message: err?.message,
-          color: 'red',
-          icon: <IconX />,
-        });
-      } finally {
-        setLoading(false);
+      if (metronId && /^\d+$/.test(metronId)) {
+        payload.metron_id = metronId;
+      } else if (cleanedBarcode) {
+        payload.barcode = cleanedBarcode;
+      } else {
+        payload.query = searchQuery;
       }
-    };
 
-    handleLookup();
-  }, [barcode, context.api]);
+      const response = await context.api.post<LookupResponse>(
+        '/plugin/comic_scanner/comic-lookup/',
+        payload
+      );
 
-  /* -------------------- Helpers -------------------- */
+      const data = response.data;
+
+      if (!data?.success || !data?.comic_data || !data?.variants) {
+        throw new Error(data?.message || 'Invalid response');
+      }
+
+      setLookupResult({
+        defaultComic: data.comic_data,
+        variants: data.variants,
+        scannedBarcode: data.scanned_barcode || ''
+      });
+
+      const matched = data.variants.find((v: Variant) => v.is_scanned_match);
+      const initialVariant = matched || data.variants[0] || null;
+      setSelectedVariant(initialVariant);
+
+      const baseIpn = data.comic_data.ipn_proposed;
+      const initialIpn = initialVariant
+        ? getVariantIpn(baseIpn, initialVariant.variant)
+        : baseIpn;
+
+      setEditedData({
+        title: initialVariant?.display_name ?? data.comic_data.title,
+        description: initialVariant?.description ?? data.comic_data.description,
+        image_url: initialVariant?.image_url ?? data.comic_data.image_url,
+        cover_date: initialVariant?.cover_date ?? data.comic_data.cover_date,
+        store_date: initialVariant?.store_date ?? data.comic_data.store_date,
+        ipn_proposed: initialIpn
+      });
+
+      setEditedUPC(data.scanned_barcode || '');
+
+      setListedOnWhatnot(data.comic_data.listed_on_whatnot || false);
+      setWhatnotAuctionPrice(data.comic_data.whatnot_price || '');
+
+      const defaultCat = data.comic_data.default_category || 1;
+      setSelectedCategory(defaultCat);
+
+      setIncludeTitle(true);
+      setIncludeIPN(true);
+      setIncludeDescription(true);
+      setIncludeImage(true);
+      setIncludeUPC(!!data.scanned_barcode);
+      setCreateStock(true);
+      setInitialQuantity(1);
+
+      // Check if base part already exists
+      const partRes = await context.api.get('/api/part/', {
+        params: { search: data.comic_data.ipn_proposed }
+      });
+      const parts = Array.isArray(partRes.data)
+        ? partRes.data
+        : partRes.data.results || [];
+      const exactMatch = parts.find(
+        (p: any) => p.IPN?.trim() === data.comic_data.ipn_proposed.trim()
+      );
+      setExistingPartPk(exactMatch?.pk ?? null);
+
+      notifications.show({
+        title: payload.metron_id
+          ? 'Metron ID loaded'
+          : data.scanned_barcode
+            ? 'Found on Metron'
+            : 'Search results',
+        message: `${data.variants.length} entries available`,
+        color: 'green',
+        icon: <IconCheck />
+      });
+    } catch (err: any) {
+      setError(err?.message || 'Lookup failed');
+      notifications.show({
+        title: 'Error',
+        message: err?.message || 'Lookup failed',
+        color: 'red',
+        icon: <IconX />
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedVariant && lookupResult) {
+      const baseIpn = lookupResult.defaultComic.ipn_proposed;
+      const variantIpn = getVariantIpn(baseIpn, selectedVariant.variant);
+
+      setEditedData((prev) => ({
+        ...prev,
+        title: selectedVariant.display_name,
+        description: selectedVariant.description,
+        image_url: selectedVariant.image_url,
+        cover_date: selectedVariant.cover_date,
+        store_date: selectedVariant.store_date,
+        ipn_proposed: variantIpn
+      }));
+      if (selectedVariant.upc) {
+        setEditedUPC(selectedVariant.upc);
+      }
+    }
+  }, [selectedVariant, lookupResult]);
+
   const determinePublisherCode = (publisher: string, barcode: string) => {
     if (PUBLISHER_CODES[publisher]) return PUBLISHER_CODES[publisher];
-    const sortedPrefixes = Object.keys(PUBLISHER_UPC_PREFIXES).sort((a, b) => b.length - a.length);
+    const sortedPrefixes = Object.keys(PUBLISHER_UPC_PREFIXES).sort(
+      (a, b) => b.length - a.length
+    );
     for (const prefix of sortedPrefixes) {
       if (barcode.startsWith(prefix)) return PUBLISHER_UPC_PREFIXES[prefix];
     }
@@ -212,194 +376,287 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const determineCategory = (pubCode: string) =>
     PUBLISHER_PART_CATEGORIES[pubCode] || 1;
 
-  const ensureUpcTemplate = async (): Promise<number> => {
-    console.log("[UPC TEMPLATE] Using modern version without units/choices - 2026");
-
-    if (upcTemplatePkCache !== null) {
-      console.log("[UPC TEMPLATE] Cache hit:", upcTemplatePkCache);
-      return upcTemplatePkCache!;
-    }
+  const ensureUpcTemplate = async (): Promise<number | null> => {
+    if (upcTemplatePkCache !== null) return upcTemplatePkCache;
 
     try {
-      console.log("[UPC TEMPLATE] GET checking for UPC template...");
       const res = await context.api.get('/api/part/parameter/template/', {
-        params: { name: 'UPC' },
-        headers: {
-          Accept: 'application/json',
-        },
+        params: { name: 'UPC' }
       });
 
-      console.log("[UPC TEMPLATE] Response status:", res.status);
-      console.log("[UPC TEMPLATE] Content-Type:", res.headers['content-type']);
-      console.log("[UPC TEMPLATE] Data preview:", typeof res.data === 'string' 
-        ? res.data.substring(0, 300)
-        : JSON.stringify(res.data, null, 2));
-      console.log("[UPC TEMPLATE] GET count:", res.data.count);
+      const templates: any[] = res.data?.results || res.data || [];
 
-      if (res.data.count > 0) {
-        upcTemplatePkCache = res.data.results[0].pk;
-        console.log("[UPC TEMPLATE] Found existing, PK:", upcTemplatePkCache);
-        return upcTemplatePkCache!;
+      if (templates.length > 0) {
+        const template = templates.find(
+          (t: any) => t.name?.trim().toUpperCase() === 'UPC'
+        );
+        if (template?.pk) {
+          upcTemplatePkCache = template.pk;
+          return upcTemplatePkCache;
+        }
       }
 
-      console.log("[UPC TEMPLATE] Creating new UPC template (no units/choices sent)");
-      const createRes = await context.api.post('/api/part/parameter/template/', {
-        name: 'UPC',
-        description: 'Universal Product Code (barcode)',
-        data_type: 'string',
-        default_value: '',
-      });
+      const createRes = await context.api.post(
+        '/api/part/parameter/template/',
+        {
+          name: 'UPC',
+          description: 'Universal Product Code (barcode)',
+          data_type: 'string',
+          default_value: 'N/A'
+        }
+      );
 
-      upcTemplatePkCache = createRes.data.pk;
-      console.log("[UPC TEMPLATE] Created, PK:", upcTemplatePkCache);
-      return upcTemplatePkCache!;
+      if (createRes.data?.pk) {
+        upcTemplatePkCache = createRes.data.pk;
+        return upcTemplatePkCache;
+      }
+
+      throw new Error('Could not create UPC template');
     } catch (err: any) {
-      console.error("[UPC TEMPLATE] Failed:", err?.response?.data || err);
-      throw err;
+      console.error('[UPC TEMPLATE] Failed:', err);
+      return null;
     }
   };
 
-  /* -------------------- Create / Update Flow -------------------- */
-  const handleCreateOrUpdate = async () => {
-    if (!result) return;
+  const ensureParameter = async (
+    partPk: number,
+    templateName: string,
+    value: any,
+    isBoolean: boolean = false,
+    templatePk: number
+  ) => {
+    if (!partPk || !templatePk) return;
+
+    try {
+      const dataValue = isBoolean
+        ? value === true || value === 'true'
+          ? 'true'
+          : 'false'
+        : String(value || '').trim();
+
+      if (isBoolean && dataValue === 'false') return;
+      if (!isBoolean && !dataValue) return;
+
+      const existingRes = await context.api.get('/api/part/parameter/', {
+        params: { part: partPk, template: templatePk }
+      });
+
+      if (existingRes.data?.count > 0) {
+        const paramId = existingRes.data.results[0].pk;
+        await context.api.patch(`/api/part/parameter/${paramId}/`, {
+          data: dataValue
+        });
+      } else {
+        await context.api.post('/api/part/parameter/', {
+          part: partPk,
+          template: templatePk,
+          data: dataValue
+        });
+      }
+    } catch (err: any) {
+      console.error(
+        `Failed to save "${templateName}":`,
+        err?.response?.data || err
+      );
+      notifications.show({
+        title: `Could not save ${templateName}`,
+        message: err?.message || 'Unknown error',
+        color: 'red',
+        autoClose: 8000
+      });
+    }
+  };
+
+  const handleSavePart = async (mode: 'update-existing' | 'create-variant') => {
+    if (!lookupResult || !selectedVariant) return;
 
     setLoading(true);
     setError(null);
 
-    try {
-      let partPk = existingPartPk;
-      const payload: Record<string, any> = {};
+    const active = {
+      ...lookupResult.defaultComic,
+      title: includeTitle
+        ? (editedData.title ?? selectedVariant.display_name)
+        : lookupResult.defaultComic.title,
+      // ← NEW: Truncate description automatically
 
-      const pubCode = determinePublisherCode(result.publisher, barcode);
+      description: includeDescription
+        ? truncateDescription(
+            editedData.description ?? selectedVariant.description
+          )
+        : '',
+
+      image_url: includeImage
+        ? (editedData.image_url ?? selectedVariant.image_url)
+        : '',
+      variant: selectedVariant.variant,
+      metron_id: selectedVariant.metron_id,
+      metron_url: `https://metron.cloud/issue/${selectedVariant.metron_id}/`,
+      cover_date: editedData.cover_date ?? selectedVariant.cover_date,
+      store_date: editedData.store_date ?? selectedVariant.store_date,
+      part_link: lookupResult.defaultComic.part_link
+    };
+
+    let finalIpn: string;
+    let partPk: number | null = null;
+
+    if (mode === 'update-existing') {
+      if (!existingPartPk) return;
+      partPk = existingPartPk;
+      finalIpn = lookupResult.defaultComic.ipn_proposed;
+    } else {
+      partPk = null;
+      finalIpn = includeIPN
+        ? (editedData.ipn_proposed ??
+          getVariantIpn(
+            lookupResult.defaultComic.ipn_proposed,
+            selectedVariant.variant
+          ))
+        : lookupResult.defaultComic.ipn_proposed;
+    }
+
+    try {
+      const pubCode = determinePublisherCode(
+        active.publisher,
+        lookupResult.scannedBarcode
+      );
       const stockLocation = determineStockLocation(pubCode);
-      const category = determineCategory(pubCode);
+      const finalCategory =
+        selectedCategory !== null
+          ? selectedCategory
+          : determineCategory(pubCode);
 
       const safeQuantity =
         typeof initialQuantity === 'number' && initialQuantity >= 1
           ? initialQuantity
           : null;
 
-      const stockBatch = includeIPN ? result.ipn_proposed : undefined;
+      const stockBatch = includeIPN ? finalIpn : undefined;
 
       if (!partPk) {
-        // ── CREATE NEW PART ────────────────────────────────────────
-
-        payload.name = includeTitle
-          ? result.title
-          : `Comic ${result.ipn_proposed || barcode.slice(-6) || 'Unknown'}`;
-
-        if (includeDescription) payload.description = result.description;
-
-        Object.assign(payload, {
+        const payload: Record<string, any> = {
+          name: includeTitle ? active.title : `Comic ${finalIpn || 'Unknown'}`,
           units: 'each',
-          category,
+          category: finalCategory,
           active: true,
-          stock_location: stockLocation,
-        });
+          stock_location: stockLocation
+        };
 
-        if (includeImage && result.image_url) {
-          payload.remote_image = result.image_url;
+        if (includeDescription) payload.description = active.description;
+        if (includeImage && active.image_url) {
+          payload.remote_image = active.image_url;
         }
-
         if (createStock && safeQuantity !== null) {
           payload.initial_stock = {
             quantity: safeQuantity,
             batch: stockBatch,
-            location: stockLocation ?? undefined,
+            location: stockLocation ?? undefined
           };
         }
 
-        if (!dryRun) {
-          const createRes = await context.api.post('/api/part/', {
-            ...payload,
-            IPN: includeIPN ? result.ipn_proposed : undefined,
-          });
-          partPk = createRes.data.pk;
-        }
+        const createRes = await context.api.post('/api/part/', {
+          ...payload,
+          IPN: includeIPN ? finalIpn : undefined
+        });
+        partPk = createRes.data.pk;
       } else {
-        // ── UPDATE EXISTING PART ───────────────────────────────────
+        const patchPayload: Record<string, any> = {};
+        if (includeTitle) patchPayload.name = active.title;
+        if (includeDescription) patchPayload.description = active.description;
+        if (includeIPN) patchPayload.IPN = finalIpn;
 
-        if (!dryRun) {
-          const patchPayload: Record<string, any> = {};
-
-          if (includeTitle) patchPayload.name = result.title;
-          if (includeDescription) patchPayload.description = result.description;
-          if (includeIPN) patchPayload.IPN = result.ipn_proposed;
-
-          if (includeImage && result.image_url) {
-            patchPayload.remote_image = result.image_url;
-          }
-
-          if (Object.keys(patchPayload).length > 0) {
-            await context.api.patch(`/api/part/${partPk}/`, patchPayload);
-          }
+        if (includeImage && active.image_url) {
+          patchPayload.remote_image = active.image_url;
         }
 
-        if (createStock && safeQuantity !== null && !dryRun) {
+        if (Object.keys(patchPayload).length > 0) {
+          await context.api.patch(`/api/part/${partPk}/`, patchPayload);
+        }
+
+        if (createStock && safeQuantity !== null) {
           await context.api.post('/api/stock/', {
             part: partPk,
             quantity: safeQuantity,
             location: stockLocation ?? undefined,
-            batch: stockBatch,
+            batch: stockBatch
           });
         }
       }
 
-      // Save UPC – improved error handling
-      if (includeUPC && barcode && partPk && !dryRun) {
-        try {
-          const upcTemplatePk = await ensureUpcTemplate();
-
+      // Save UPC
+      if (includeUPC && editedUPC.trim() && partPk) {
+        const upcTemplatePk = await ensureUpcTemplate();
+        if (upcTemplatePk) {
+          const trimmedUPC = editedUPC.trim();
           const existingRes = await context.api.get('/api/part/parameter/', {
-            params: { part: partPk, template: upcTemplatePk },
+            params: { part: partPk, template: upcTemplatePk }
           });
 
           if (existingRes.data.count > 0) {
             const paramId = existingRes.data.results[0].pk;
             await context.api.patch(`/api/part/parameter/${paramId}/`, {
-              data: barcode.trim(),
+              data: trimmedUPC
             });
           } else {
             await context.api.post('/api/part/parameter/', {
               part: partPk,
               template: upcTemplatePk,
-              data: barcode.trim(),
+              data: trimmedUPC
             });
           }
-        } catch (upcErr: any) {
-          const detail = upcErr?.response?.data || upcErr.message || 'Unknown UPC error';
-          notifications.show({
-            title: 'Could not save UPC',
-            message: typeof detail === 'object'
-              ? (detail?.non_field_errors?.[0] || JSON.stringify(detail))
-              : detail,
-            color: 'yellow',
-            autoClose: 8000,
-          });
         }
       }
 
-      // Show success + link (keep form visible)
-      if (partPk && !dryRun) {
+      // Save WhatNot and Condition parameters
+      if (partPk) {
+        await ensureParameter(
+          partPk,
+          'Listed on WhatNot',
+          listedOnWhatnot,
+          true,
+          11
+        );
+        const price = whatnotAuctionPrice.trim();
+        if (price) {
+          await ensureParameter(
+            partPk,
+            'WhatNot Auction Price',
+            price,
+            false,
+            21
+          );
+        }
+
+        // Save Condition (PK = 16)
+        await ensureParameter(
+          partPk,
+          'Condition',
+          selectedCondition,
+          false,
+          16
+        );
+
         setCreatedOrUpdatedPart({
           pk: partPk,
-          name: result.title,
+          name: active.title
         });
       }
 
       notifications.show({
-        title: existingPartPk ? 'Part Updated' : 'Part Created',
+        title:
+          mode === 'update-existing' ? 'Part Updated' : 'New Variant Created',
         message: (
           <>
-            {result.title}
-            {createStock && safeQuantity !== null ? ` (+${safeQuantity} in stock)` : ''}
-            {stockBatch ? ` | Batch/IPN: ${stockBatch}` : ''}
+            {active.title}
+            {createStock && safeQuantity !== null
+              ? ` (+${safeQuantity} stock)`
+              : ''}
             <br />
             <a
               href={`/part/${partPk}/`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ color: 'var(--mantine-color-blue-6)', textDecoration: 'underline' }}
+              target='_blank'
+              rel='noopener noreferrer'
+              style={{ color: 'var(--mantine-color-blue-6)' }}
             >
               View part → #{partPk}
             </a>
@@ -407,177 +664,564 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         ),
         color: 'green',
         icon: <IconCheck />,
-        autoClose: 12000,
+        autoClose: 12000
       });
     } catch (err: any) {
       const apiError = err?.response?.data || err.message;
-      setError(typeof apiError === 'object' ? JSON.stringify(apiError, null, 2) : apiError);
+      setError(
+        typeof apiError === 'object'
+          ? JSON.stringify(apiError, null, 2)
+          : apiError
+      );
       notifications.show({
         title: 'Operation Failed',
-        message: typeof apiError === 'object' ? JSON.stringify(apiError, null, 2) : apiError,
+        message:
+          typeof apiError === 'object'
+            ? JSON.stringify(apiError, null, 2)
+            : apiError,
         color: 'red',
-        autoClose: false,
+        autoClose: false
       });
     } finally {
       setLoading(false);
     }
   };
 
-  /* -------------------- UI -------------------- */
+  const handleUpdateExisting = () => handleSavePart('update-existing');
+  const handleCreateNewVariant = () => handleSavePart('create-variant');
+
+  const activeComic =
+    selectedVariant && lookupResult
+      ? {
+          ...lookupResult.defaultComic,
+          title: editedData.title ?? selectedVariant.display_name,
+          description: editedData.description ?? selectedVariant.description,
+          image_url: editedData.image_url ?? selectedVariant.image_url,
+          metron_id: selectedVariant.metron_id,
+          metron_url: selectedVariant.metron_id
+            ? `https://metron.cloud/issue/${selectedVariant.metron_id}/`
+            : '',
+          cover_date: editedData.cover_date ?? selectedVariant.cover_date,
+          store_date: editedData.store_date ?? selectedVariant.store_date,
+          part_link: lookupResult.defaultComic.part_link || ''
+        }
+      : (lookupResult?.defaultComic ?? null);
+
+  const currentDescription =
+    editedData.description ?? activeComic?.description ?? '';
+  const hasSourceLink = !!activeComic?.part_link;
+
   return (
-    <Stack p="md">
+    <Stack p='md'>
       <Title order={3}>Comic Scanner</Title>
 
-      <Switch
-        label="Dry Run Mode"
-        checked={dryRun}
-        onChange={(e) => setDryRun(e.currentTarget.checked)}
-      />
-
-      <Group grow mt="md">
+      <Stack mt='md' gap='md'>
         <TextInput
-          placeholder="Scan UPC... (spaces or hyphens OK)"
+          placeholder='Scan or enter UPC barcode...'
           value={barcodeInput}
           onChange={(e) => setBarcodeInput(e.currentTarget.value)}
           leftSection={<IconBarcode />}
         />
+
+        <TextInput
+          placeholder='Metron.cloud issue ID (e.g. 12345)'
+          value={metronIdInput}
+          onChange={(e) => setMetronIdInput(e.currentTarget.value)}
+          leftSection={<IconExternalLink size={16} />}
+        />
+
+        <TextInput
+          placeholder='Search by title, series, issue # (e.g. Batman 123)'
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.currentTarget.value)}
+          leftSection={<IconSearch />}
+        />
+
         <Button
-          onClick={() => setBarcode(cleanBarcode(barcodeInput.trim()))}
+          onClick={handleLookupClick}
           loading={loading}
-          disabled={!barcodeInput.trim() || loading}
+          disabled={
+            loading ||
+            (!barcodeInput.trim() &&
+              !metronIdInput.trim() &&
+              !queryInput.trim())
+          }
+          fullWidth
         >
           Lookup
         </Button>
-      </Group>
+      </Stack>
 
       {loading && <Loader />}
-      {error && <Alert color="red" title="Error">{error}</Alert>}
+      {error && (
+        <Alert color='red' title='Error'>
+          {error}
+        </Alert>
+      )}
 
-      {result && (
+      {lookupResult && activeComic && selectedVariant && (
         <>
-          <Alert color="blue" title={result.title} mt="md">
-            {result.description}
-          </Alert>
+          <Group grow align='flex-start' mt='xl'>
+            <Stack style={{ flex: 1 }}>
+              <Title order={5}>
+                Select Variant ({lookupResult.variants.length})
+              </Title>
 
-          <Table withTableBorder mt="md">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Include</Table.Th>
-                <Table.Th>Field</Table.Th>
-                <Table.Th>Value</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              <Table.Tr>
-                <Table.Td><Switch checked={includeTitle} onChange={(e) => setIncludeTitle(e.currentTarget.checked)} /></Table.Td>
-                <Table.Td>Title</Table.Td>
-                <Table.Td>{result.title}</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td><Switch checked={includeIPN} onChange={(e) => setIncludeIPN(e.currentTarget.checked)} /></Table.Td>
-                <Table.Td>IPN</Table.Td>
-                <Table.Td>{result.ipn_proposed}</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td><Switch checked={includeDescription} onChange={(e) => setIncludeDescription(e.currentTarget.checked)} /></Table.Td>
-                <Table.Td>Description</Table.Td>
-                <Table.Td>{result.description}</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td><Switch checked={includeImage} onChange={(e) => setIncludeImage(e.currentTarget.checked)} /></Table.Td>
-                <Table.Td>Cover Image</Table.Td>
-                <Table.Td>{result.image_url ? 'Yes' : '—'}</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td><Switch checked={includeUPC} onChange={(e) => setIncludeUPC(e.currentTarget.checked)} /></Table.Td>
-                <Table.Td>UPC</Table.Td>
-                <Table.Td>{barcode}</Table.Td>
-              </Table.Tr>
-              <Table.Tr>
-                <Table.Td />
-                <Table.Td>Category</Table.Td>
-                <Table.Td>{determineCategory(determinePublisherCode(result.publisher, barcode))}</Table.Td>
-              </Table.Tr>
-            </Table.Tbody>
-          </Table>
+              {lookupResult.variants.length > 30 && (
+                <Alert color='orange' title='Large number of matches'>
+                  Many results – pick the correct cover based on
+                  image/description.
+                </Alert>
+              )}
 
-          <Stack mt="xl" gap="xs">
+              <Table highlightOnHover withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th />
+                    <Table.Th>Cover</Table.Th>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>UPC</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {lookupResult.variants.map((v) => (
+                    <Table.Tr
+                      key={v.metron_id}
+                      onClick={() => setSelectedVariant(v)}
+                      style={{ cursor: 'pointer' }}
+                      bg={
+                        selectedVariant.metron_id === v.metron_id
+                          ? 'var(--mantine-color-blue-light)'
+                          : undefined
+                      }
+                    >
+                      <Table.Td>
+                        {selectedVariant.metron_id === v.metron_id && (
+                          <IconCheck color='green' />
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        {v.image_url ? (
+                          <Image
+                            src={v.image_url}
+                            alt={v.variant}
+                            width={60}
+                            height={90}
+                            fit='contain'
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </Table.Td>
+                      <Table.Td>{v.display_name}</Table.Td>
+                      <Table.Td>
+                        {v.is_scanned_match ? (
+                          <IconCheck
+                            color='green'
+                            title='Matches scanned barcode'
+                          />
+                        ) : v.upc ? (
+                          'Other'
+                        ) : (
+                          '—'
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Stack>
+
+            <Stack style={{ flex: 1 }}>
+              <Alert
+                color='blue'
+                title={activeComic.title}
+                icon={<IconCheck />}
+              >
+                <Group justify='space-between' align='center'>
+                  <Text>
+                    {activeComic.description || 'No description available.'}
+                  </Text>
+
+                  {hasSourceLink ? (
+                    <Button
+                      variant='light'
+                      color='blue'
+                      component='a'
+                      href={activeComic.part_link}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      leftSection={<IconExternalLink size={16} />}
+                      size='xs'
+                    >
+                      Open on Metron
+                    </Button>
+                  ) : (
+                    <Text size='sm' color='dimmed'>
+                      No source link available
+                    </Text>
+                  )}
+                </Group>
+              </Alert>
+
+              {activeComic.image_url && (
+                <Image
+                  src={activeComic.image_url}
+                  alt='Selected cover'
+                  radius='md'
+                  mah={400}
+                  fit='contain'
+                  mt='md'
+                />
+              )}
+
+              <Table withTableBorder mt='md'>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Include</Table.Th>
+                    <Table.Th>Field</Table.Th>
+                    <Table.Th>Value (editable)</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch
+                        checked={includeTitle}
+                        onChange={(e) =>
+                          setIncludeTitle(e.currentTarget.checked)
+                        }
+                      />
+                    </Table.Td>
+                    <Table.Td>Title</Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        value={editedData.title ?? activeComic.title}
+                        onChange={(e) =>
+                          setEditedData({
+                            ...editedData,
+                            title: e.currentTarget.value
+                          })
+                        }
+                        disabled={!includeTitle}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch
+                        checked={includeIPN}
+                        onChange={(e) => setIncludeIPN(e.currentTarget.checked)}
+                      />
+                    </Table.Td>
+                    <Table.Td>IPN</Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        value={
+                          editedData.ipn_proposed ??
+                          lookupResult.defaultComic.ipn_proposed
+                        }
+                        onChange={(e) =>
+                          setEditedData({
+                            ...editedData,
+                            ipn_proposed: e.currentTarget.value
+                          })
+                        }
+                        placeholder={lookupResult.defaultComic.ipn_proposed}
+                        disabled={!includeIPN}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch
+                        checked={includeDescription}
+                        onChange={(e) =>
+                          setIncludeDescription(e.currentTarget.checked)
+                        }
+                      />
+                    </Table.Td>
+                    <Table.Td>Description</Table.Td>
+                    <Table.Td>
+                      <Stack gap='xs'>
+                        <Textarea
+                          value={currentDescription}
+                          onChange={(e) => {
+                            const newValue = e.currentTarget.value;
+                            setEditedData({
+                              ...editedData,
+                              description: newValue
+                            });
+                          }}
+                          autosize
+                          minRows={3}
+                          maxRows={12}
+                          disabled={!includeDescription}
+                          styles={{ input: { resize: 'vertical' } }}
+                          placeholder='Comic description (will be auto-truncated to 250 chars)'
+                        />
+
+                        <Group justify='space-between' align='center'>
+                          <Text size='xs' color='dimmed'>
+                            {currentDescription.length} / 250 characters
+                          </Text>
+
+                          {currentDescription.length > 250 && (
+                            <Text size='xs' color='orange' fw={500}>
+                              Will be truncated to 250 chars
+                            </Text>
+                          )}
+                        </Group>
+
+                        {/* Optional: Show what the final truncated version will look like */}
+                        {currentDescription.length > 247 &&
+                          includeDescription && (
+                            <Text
+                              size='xs'
+                              color='dimmed'
+                              style={{ fontStyle: 'italic' }}
+                            >
+                              Saved as:{' '}
+                              {truncateDescription(currentDescription)}
+                            </Text>
+                          )}
+                      </Stack>
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch
+                        checked={includeImage}
+                        onChange={(e) =>
+                          setIncludeImage(e.currentTarget.checked)
+                        }
+                      />
+                    </Table.Td>
+                    <Table.Td>Cover Image URL</Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        value={editedData.image_url ?? activeComic.image_url}
+                        onChange={(e) =>
+                          setEditedData({
+                            ...editedData,
+                            image_url: e.currentTarget.value
+                          })
+                        }
+                        disabled={!includeImage}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch
+                        checked={includeUPC}
+                        onChange={(e) => setIncludeUPC(e.currentTarget.checked)}
+                      />
+                    </Table.Td>
+                    <Table.Td>UPC</Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        value={editedUPC}
+                        onChange={(e) =>
+                          setEditedUPC(e.currentTarget.value.trim())
+                        }
+                        placeholder={
+                          lookupResult.scannedBarcode
+                            ? 'Edit scanned UPC'
+                            : 'Enter UPC manually'
+                        }
+                        disabled={!includeUPC}
+                        error={
+                          includeUPC &&
+                          editedUPC &&
+                          !/^\d{8,20}$/.test(editedUPC.trim())
+                            ? 'UPC should be numeric (8–20 digits)'
+                            : null
+                        }
+                        type='text'
+                        inputMode='numeric'
+                        pattern='[0-9]*'
+                        maxLength={20}
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
+                      <Switch checked={true} disabled />
+                    </Table.Td>
+                    <Table.Td>Part Category</Table.Td>
+                    <Table.Td>
+                      <Select
+                        value={selectedCategory?.toString() || ''}
+                        onChange={(value) =>
+                          setSelectedCategory(value ? parseInt(value) : null)
+                        }
+                        data={[
+                          { value: '1', label: 'Comic Books (Default)' },
+                          { value: '2', label: 'Dark Horse Comics' },
+                          { value: '3', label: 'DC Comics' },
+                          { value: '4', label: 'Image Comics' },
+                          { value: '5', label: 'Marvel Comics' },
+                          { value: '23', label: 'Valiant Entertainment' },
+                          { value: '24', label: 'IDW Publishing' },
+                          { value: '105', label: 'Dynamite Comics' }
+                        ]}
+                        placeholder='Select part category'
+                        searchable
+                        clearable
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                </Table.Tbody>
+              </Table>
+            </Stack>
+          </Group>
+
+          <Stack mt='xl' gap='xs'>
             <Title order={5}>Stock Adjustment</Title>
             <Switch
-              label="Add initial stock (new part) or new stock item (existing part)"
+              label='Add initial stock (new part) or new stock item (existing part)'
               checked={createStock}
               onChange={(e) => setCreateStock(e.currentTarget.checked)}
             />
             {createStock && (
               <NumberInput
-                label="Quantity to add"
+                label='Quantity to add'
                 min={1}
                 value={initialQuantity}
-                onChange={(value) => setInitialQuantity(value as number | '')}
-                placeholder="e.g. 12"
+                onChange={(val) => setInitialQuantity(val as number | '')}
+                placeholder='e.g. 12'
                 allowDecimal={false}
                 allowNegative={false}
               />
             )}
-            {createStock && initialQuantity === '' && (
-              <Alert color="yellow" title="Note">
-                Quantity must be at least 1 to add stock.
-              </Alert>
-            )}
           </Stack>
 
-          {result.image_url && (
-            <Image
-              src={result.image_url}
-              alt="Cover"
-              radius="md"
-              mah={300}
-              fit="contain"
-              mt="md"
-            />
-          )}
+          {/* Additional Part Parameters */}
+          <Stack mt='xl' gap='xs'>
+            <Title order={5}>Additional Part Parameters</Title>
+            <Table withTableBorder>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Field</Table.Th>
+                  <Table.Th>Value</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                <Table.Tr>
+                  <Table.Td>Listed on WhatNot</Table.Td>
+                  <Table.Td>
+                    <Switch
+                      checked={listedOnWhatnot}
+                      onChange={(e) =>
+                        setListedOnWhatnot(e.currentTarget.checked)
+                      }
+                      label='This issue is listed for sale on WhatNot'
+                    />
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Td>WhatNot Auction Price</Table.Td>
+                  <Table.Td>
+                    <TextInput
+                      value={whatnotAuctionPrice}
+                      onChange={(e) =>
+                        setWhatnotAuctionPrice(e.currentTarget.value)
+                      }
+                      placeholder='e.g. 12.99'
+                      leftSection='$'
+                      type='number'
+                      step='0.01'
+                      min={0}
+                    />
+                  </Table.Td>
+                </Table.Tr>
+                <Table.Tr>
+                  <Table.Td>Condition</Table.Td>
+                  <Table.Td>
+                    <Select
+                      value={selectedCondition}
+                      onChange={(value) =>
+                        setSelectedCondition(value || 'Near Mint')
+                      }
+                      data={COMIC_CONDITIONS}
+                      placeholder='Select condition'
+                      searchable
+                    />
+                  </Table.Td>
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </Stack>
 
           {createdOrUpdatedPart && (
             <Alert
-              color="green"
-              title={existingPartPk ? 'Part Updated' : 'Part Created'}
+              color='green'
+              title={existingPartPk ? 'Updated' : 'Created'}
               icon={<IconCheck />}
-              mt="md"
+              mt='md'
             >
-              <Group justify="space-between" wrap="nowrap">
+              <Group justify='space-between'>
                 <div>
                   <strong>{createdOrUpdatedPart.name}</strong> is ready.
                 </div>
                 <Button
-                  variant="light"
-                  component="a"
+                  variant='light'
+                  component='a'
                   href={`/part/${createdOrUpdatedPart.pk}/`}
-                  target="_blank"
+                  target='_blank'
                   rightSection={<IconExternalLink size={16} />}
                 >
-                  Open part
+                  Open
                 </Button>
               </Group>
             </Alert>
           )}
 
-          <Group mt="md">
+          <Group mt='xl'>
+            {existingPartPk ? (
+              <>
+                <Button
+                  color='blue'
+                  onClick={handleUpdateExisting}
+                  loading={loading}
+                  disabled={loading}
+                >
+                  Update Existing Part
+                </Button>
+                <Button
+                  color='green'
+                  onClick={handleCreateNewVariant}
+                  loading={loading}
+                  disabled={loading}
+                >
+                  Create New Variant Part
+                </Button>
+              </>
+            ) : (
+              <Button
+                color='green'
+                onClick={handleCreateNewVariant}
+                loading={loading}
+                disabled={loading}
+              >
+                Create Part
+              </Button>
+            )}
+
             <Button
-              color="green"
-              onClick={handleCreateOrUpdate}
-              loading={loading}
-              disabled={loading}
-            >
-              {dryRun
-                ? existingPartPk ? 'Preview Update' : 'Preview Create'
-                : existingPartPk ? 'Update Part' : 'Create Part'}
-            </Button>
-            <Button
-              variant="outline"
+              variant='outline'
               onClick={() => {
-                setResult(null);
-                setBarcode('');
+                setLookupResult(null);
+                setSelectedVariant(null);
                 setBarcodeInput('');
+                setMetronIdInput('');
+                setQueryInput('');
                 setExistingPartPk(null);
                 setInitialQuantity(1);
                 setCreateStock(true);
@@ -587,6 +1231,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 setIncludeDescription(true);
                 setIncludeImage(true);
                 setIncludeUPC(true);
+                setEditedData({});
+                setEditedUPC('');
+                setListedOnWhatnot(false);
+                setWhatnotAuctionPrice('');
+                setSelectedCondition('Near Mint');
+                setSelectedCategory(null);
               }}
             >
               Clear
