@@ -54,6 +54,7 @@ class ComicLookupAPIView(APIView):
 
     PUBLISHER_CODES = {
         "Archie Comics": "ARCH",
+        "Bad Idea Comics": "BAD",
         "Boom! Studios": "BOOM",
         "DC Comics": "DC",
         "Dark Horse Comics": "DHC",
@@ -63,10 +64,13 @@ class ComicLookupAPIView(APIView):
         "Mad Cave Comics": "MAD",
         "Marvel Comics": "MAR",
         "Valiant Entertainment": "VAL",
+        "Vault Comics": "VAU",
+        "Vertigo Comics": "VER",
     }
 
     PUBLISHER_NAME_FROM_CODE = {
         "ARCH": "Archie Comics",
+        "BAD": "Bad Idea Comics",
         "BOOM": "Boom! Studios",
         "DC": "DC Comics",
         "DHC": "Dark Horse Comics",
@@ -76,10 +80,13 @@ class ComicLookupAPIView(APIView):
         "MAD": "Mad Cave Comics",
         "MAR": "Marvel Comics",
         "VAL": "Valiant Entertainment",
+        "VAU": "Vault Comics",
+        "VER": "Vertigo Comics",
     }
 
     PUBLISHER_PART_CATEGORIES: dict = {
         "ARCH": None,
+        "BAD": 22,
         "BOOM": None,
         "DC": 3,
         "DHC": 2,
@@ -89,6 +96,7 @@ class ComicLookupAPIView(APIView):
         "MAD": 108,
         "MAR": 5,
         "VAL": 23,
+        "VAU": 109,
         "VER": 26,
     }
 
@@ -97,6 +105,7 @@ class ComicLookupAPIView(APIView):
         "071486": "MAR",
         "59606": "MAR",
         "60196": "MAD",
+        # "65946": "???",
         "704": "IMG",
         "709": "IMG",
         "70985": "IMG",
@@ -105,6 +114,8 @@ class ComicLookupAPIView(APIView):
         "761568": "DHC",
         "761941": "DC",
         "827": "IDW",
+        "85001": "BAD",
+        "85005": "VAU",
     }
 
     def shorten_series_name(self, name, max_len=14):
