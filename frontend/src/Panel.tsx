@@ -72,14 +72,16 @@ interface LookupResponse {
 /* -------------------- Publisher Defaults -------------------- */
 const PUBLISHER_CODES: Record<string, string> = {
   'Archie Comics': 'ARCH',
+  'Bad Idea Studios': 'BAD',
   'Boom! Studios': 'BOOM',
   'Dark Horse Comics': 'DHC',
   'DC Comics': 'DC',
   'IDW Publishing': 'IDW',
   'Image Comics': 'IMG',
   'Mad Cave Comics': 'MAD',
-  Marvel: 'MAR',
-  'Valiant Entertainment': 'VAL'
+  'Marvel Comics': 'MAR',
+  'Valiant Entertainment': 'VAL',
+  'Vault Comics': 'VAU'
 };
 
 const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
@@ -87,7 +89,7 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '071486': 'MAR',
   '59606': 'MAR',
   '60196': 'MAD',
-  '65946': '???',
+  // '65946': '???',
   '704': 'IMG',
   '709': 'IMG',
   '70985': 'IMG',
@@ -95,11 +97,14 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '759606': 'MAR',
   '761568': 'DHC',
   '761941': 'DC',
-  '827': 'IDW'
+  '827': 'IDW',
+  '85001': 'BAD',
+  '85005': 'VAU'
 };
 
 const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
   ARCH: null,
+  BAD: 22,
   BOOM: null,
   DC: 3,
   DHC: 2,
@@ -109,21 +114,24 @@ const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
   MAD: 108,
   MAR: 5,
   VAL: 23,
+  VAU: 109,
   VER: 26
 };
 
 const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
   ARCH: null,
+  BAD: 82,
   BOOM: null,
   DC: 91,
-  DHC: null,
+  DHC: 73,
   DYN: 94,
-  IDW: null,
+  IDW: 76,
   IMG: 70,
   MAD: 98,
-  MAR: 92,
-  VAL: null,
-  VER: null
+  MAR: 66,
+  VAL: 80,
+  VAU: 99,
+  VER: 84
 };
 
 const COMIC_CONDITIONS = [
