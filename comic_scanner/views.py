@@ -1,57 +1,69 @@
 import logging
 import os
 import random
-import string
+import re
 import requests
+import string
 
 from datetime import date
 
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from part.models import Part
 
-from .serializers import ExampleSerializer
+logger = logging.getLogger("inventree")
 
-logger = logging.getLogger(__name__)
 
-# Safe Mokkari import
+def strip_html(text: str) -> str:
+    """Convert HTML to clean text while preserving <p> and <br> formatting."""
+    if not text:
+        return ""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<.*?>", "", text, flags=re.DOTALL)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&quot;", '"', text)
+    text = re.sub(r"&#39;", "'", text)
+    text = re.sub(r"&[a-zA-Z0-9#]+;", " ", text)
+    text = re.sub(r"\n\s*\n", "\n\n", text)
+    text = re.sub(r" +", " ", text)
+    return text.strip()
+
+
 try:
     import mokkari
-    # from mokkari.exceptions import ApiError, RateLimitError
 
     MOKKARI_AVAILABLE = True
-    logger.info("Mokkari imported successfully")
+    logger.info("ComicScanner: Mokkari integrated successfully")
 except ImportError:
-    logger.warning("Mokkari not installed. Using raw requests fallback.")
+    logger.warning(
+        "ComicScanner: Mokkari library absent, applying direct fallback calls"
+    )
     MOKKARI_AVAILABLE = False
-except Exception as e:
-    logger.error("Failed to import mokkari: %s", e)
-    MOKKARI_AVAILABLE = False
-
-DOMAIN = "https://inventree.justusbrothers.shop"
 
 
 class ExampleView(APIView):
     permission_classes = [IsAuthenticated]
-    serializer_class = ExampleSerializer
 
     def get(self, request, *args, **kwargs):
-        response_serializer = self.serializer_class(
-            data={
+        return Response(
+            {
                 "random_text": "".join(random.choices(string.ascii_letters, k=50)),
                 "part_count": Part.objects.count(),
-                "today": date.today(),
-            }
+                "today": str(date.today()),
+            },
+            status=200,
         )
-        response_serializer.is_valid(raise_exception=True)
-        return Response(response_serializer.data, status=200)
 
 
-class ComicLookupAPIView(APIView):
+class ComicLookup(APIView):
     permission_classes = [IsAuthenticated]
 
+    # --- BLOWN OUT CODES & SHIT ---
     PUBLISHER_CODES = {
         "Archie Comics": "ARCH",
         "Bad Idea Comics": "BAD",
@@ -61,40 +73,28 @@ class ComicLookupAPIView(APIView):
         "Dynamite Comics": "DYN",
         "IDW Publishing": "IDW",
         "Image Comics": "IMG",
+        "Indie Comics": "IND",
         "Mad Cave Comics": "MAD",
         "Marvel Comics": "MAR",
+        "Oni Press": "ONI",
         "Valiant Entertainment": "VAL",
         "Vault Comics": "VAU",
         "Vertigo Comics": "VER",
     }
 
-    PUBLISHER_NAME_FROM_CODE = {
-        "ARCH": "Archie Comics",
-        "BAD": "Bad Idea Comics",
-        "BOOM": "Boom! Studios",
-        "DC": "DC Comics",
-        "DHC": "Dark Horse Comics",
-        "DYN": "Dynamite Comics",
-        "IDW": "IDW Publishing",
-        "IMG": "Image Comics",
-        "MAD": "Mad Cave Comics",
-        "MAR": "Marvel Comics",
-        "VAL": "Valiant Entertainment",
-        "VAU": "Vault Comics",
-        "VER": "Vertigo Comics",
-    }
-
-    PUBLISHER_PART_CATEGORIES: dict = {
-        "ARCH": None,
+    PUBLISHER_PART_CATEGORIES = {
+        "ARCH": 1,
         "BAD": 22,
-        "BOOM": None,
+        "BOOM": 1,
         "DC": 3,
         "DHC": 2,
         "DYN": 105,
         "IDW": 24,
         "IMG": 4,
+        "IND": 22,
         "MAD": 108,
         "MAR": 5,
+        "ONI": 107,
         "VAL": 23,
         "VAU": 109,
         "VER": 26,
@@ -105,7 +105,7 @@ class ComicLookupAPIView(APIView):
         "071486": "MAR",
         "59606": "MAR",
         "60196": "MAD",
-        # "65946": "???",
+        "64985": "ONI",
         "704": "IMG",
         "709": "IMG",
         "70985": "IMG",
@@ -117,6 +117,7 @@ class ComicLookupAPIView(APIView):
         "85001": "BAD",
         "85005": "VAU",
     }
+    # ------------------------------
 
     def shorten_series_name(self, name, max_len=14):
         return "".join(c for c in name.upper() if c.isalnum())[:max_len]
@@ -135,17 +136,17 @@ class ComicLookupAPIView(APIView):
             "skybound",
         ]:
             name = name.replace(suffix, "").strip()
-        name = " ".join(name.split())
-        return name
+        return " ".join(name.split())
 
     def post(self, request, *args, **kwargs):
         barcode = request.data.get("barcode", "")
         query = request.data.get("query", "")
         metron_id_str = request.data.get("metron_id", "")
-
         comic_vine_key = os.environ.get("COMICVINE_API_KEY")
 
-        # Clean inputs
+        if barcode:
+            barcode = "".join(c for c in str(barcode) if c.isdigit())
+
         if metron_id_str:
             metron_id_str = metron_id_str.strip()
             if not metron_id_str.isdigit():
@@ -157,16 +158,12 @@ class ComicLookupAPIView(APIView):
         else:
             metron_id = None
 
-        if barcode:
-            barcode = "".join(c for c in str(barcode) if c.isdigit())
-
         query = query.strip() if query else ""
-
         mode = "none"
-        if metron_id:
-            mode = "metron_id"
-        elif barcode:
+        if barcode:
             mode = "barcode"
+        elif metron_id:
+            mode = "metron_id"
         elif query:
             mode = "query"
         else:
@@ -182,10 +179,8 @@ class ComicLookupAPIView(APIView):
             "InvenTree-ComicScanner/1.0 (info@justusbrothers.shop; custom plugin)"
         )
 
-        # ==================== BARCODE MODE (with variant normalization) ====================
         if mode == "barcode":
             logger.info("ComicScanner: Processing barcode %s", barcode)
-
             if len(barcode) < 12:
                 return Response(
                     {"success": False, "message": "Invalid barcode length"}, status=400
@@ -203,18 +198,12 @@ class ComicLookupAPIView(APIView):
             auth = requests.auth.HTTPBasicAuth(metron_user, metron_pass)
 
             try:
-                # === UPC Normalization for Variants ===
                 original_barcode = barcode
                 standard_barcode = original_barcode
                 base_upc = original_barcode[:12]
 
                 if len(original_barcode) >= 17:
                     standard_barcode = original_barcode[:-2] + "11"
-                    logger.info(
-                        "Normalized variant UPC: %s → %s (standard)",
-                        original_barcode,
-                        standard_barcode,
-                    )
 
                 test_upcs = [standard_barcode, base_upc, original_barcode]
                 full_anchor = None
@@ -261,10 +250,6 @@ class ComicLookupAPIView(APIView):
                                     "desc": getattr(issue, "desc", "")
                                     or getattr(issue, "description", ""),
                                 }
-                                logger.info(
-                                    "Mokkari found issue %s using normalized UPC",
-                                    issue_id,
-                                )
                                 break
                     except Exception as mk_err:
                         logger.warning(
@@ -293,11 +278,6 @@ class ComicLookupAPIView(APIView):
                                     )
                                     detail_resp.raise_for_status()
                                     full_anchor = detail_resp.json()
-                                    logger.info(
-                                        "Raw requests found issue %s using %s",
-                                        issue_id,
-                                        test_upc,
-                                    )
                                     break
                         if issue_id:
                             break
@@ -306,7 +286,7 @@ class ComicLookupAPIView(APIView):
                     return Response(
                         {
                             "success": False,
-                            "message": "No base issue found for this UPC (tried normalized/standard version)",
+                            "message": "No issue records found for targeted barcode",
                         },
                         status=404,
                     )
@@ -330,10 +310,9 @@ class ComicLookupAPIView(APIView):
                             break
 
                 if pub_code == "UNK" and len(original_barcode) >= 6:
-                    sorted_prefixes = sorted(
+                    for prefix in sorted(
                         self.PUBLISHER_UPC_PREFIXES.keys(), key=len, reverse=True
-                    )
-                    for prefix in sorted_prefixes:
+                    ):
                         if original_barcode.startswith(prefix):
                             pub_code = self.PUBLISHER_UPC_PREFIXES[prefix]
                             break
@@ -355,20 +334,21 @@ class ComicLookupAPIView(APIView):
                     else ""
                 )
 
+                clean_description = strip_html(
+                    full_anchor.get("desc") or full_anchor.get("description", "")
+                )
+
                 main_variant = {
-                    "metron_id": full_anchor.get("id"),
+                    "metron_id": int(full_anchor.get("id")),  # Ensure ID is an integer
                     "variant": variant_val,
                     "display_name": f"{series_name} #{issue_number}{display_suffix}",
-                    "image_url": full_anchor.get("image", ""),
-                    "description": full_anchor.get("desc")
-                    or full_anchor.get("description", ""),
-                    "cover_date": cover_date or "Unknown",
-                    "store_date": store_date or "Unknown",
+                    "image_url": str(full_anchor.get("image", "")),
+                    "description": clean_description,
+                    "cover_date": str(cover_date or "Unknown"),
+                    "store_date": str(store_date or "Unknown"),
                     "upc": original_barcode,
                     "is_scanned_match": True,
                 }
-
-                variants_list = [main_variant]
 
                 ipn = f"CB_{pub_code}_{self.shorten_series_name(series_name)}-{issue_number.zfill(3)}"
                 if volume and str(volume) != "1":
@@ -378,25 +358,23 @@ class ComicLookupAPIView(APIView):
                     "title": f"{series_name} #{issue_number}{display_suffix}",
                     "ipn_proposed": ipn,
                     "series": series_name,
-                    "issue": issue_number,
-                    "volume": volume,
+                    "issue": str(issue_number),  # Ensure issue is string
+                    "volume": str(volume) if volume else None,
                     "publisher": raw_publisher_name,
                     "default_category": category,
                     "pub_code": pub_code,
-                    "cover_date": cover_date or "Unknown",
-                    "store_date": store_date or "Unknown",
+                    "cover_date": str(cover_date or "Unknown"),
+                    "store_date": str(store_date or "Unknown"),
                     "variant": variant_val,
-                    "description": full_anchor.get("desc")
-                    or full_anchor.get("description", ""),
-                    "metron_url": f"https://metron.cloud/issue/{full_anchor.get('id')}/"
-                    if full_anchor.get("id")
-                    else "",
-                    "metron_id": full_anchor.get("id"),
-                    "image_url": full_anchor.get("image", ""),
-                    "part_link": f"https://metron.cloud/issue/{full_anchor.get('id')}/"
-                    if full_anchor.get("id")
-                    else "",
-                    # New WhatNot fields
+                    "description": clean_description,
+                    "metron_url": str(
+                        f"https://metron.cloud/issue/{full_anchor.get('id')}/"
+                    ),
+                    "metron_id": int(full_anchor.get("id")),
+                    "image_url": str(full_anchor.get("image", "")),
+                    "part_link": str(
+                        f"https://metron.cloud/issue/{full_anchor.get('id')}/"
+                    ),
                     "listed_on_whatnot": False,
                     "whatnot_price": "",
                 }
@@ -405,10 +383,10 @@ class ComicLookupAPIView(APIView):
                     {
                         "success": True,
                         "comic_data": comic_data,
-                        "variants": variants_list,
+                        "variants": [main_variant],
                         "scanned_barcode": original_barcode,
                         "standard_barcode_used": standard_barcode,
-                        "message": "Matched base issue (variant normalized to standard cover)",
+                        "message": "Matched base issue",
                     },
                     status=200,
                 )
@@ -419,21 +397,16 @@ class ComicLookupAPIView(APIView):
 
         elif mode == "metron_id":
             return Response(
-                {
-                    "success": False,
-                    "message": "Metron ID mode not implemented in this update",
-                },
+                {"success": False, "message": "Metron ID execution mode absent"},
                 status=400,
             )
 
         else:  # mode == "query"
-            logger.info("ComicScanner: Processing search query '%s'", query)
-
             if not comic_vine_key:
                 return Response(
                     {
                         "success": False,
-                        "message": "Comic Vine API key required for title search",
+                        "message": "Comic Vine API key configuration absent",
                     },
                     status=500,
                 )
@@ -462,7 +435,7 @@ class ComicLookupAPIView(APIView):
                     return Response(
                         {
                             "success": False,
-                            "message": f"No results found for '{query}'",
+                            "message": f"No results found for query criteria: '{query}'",
                         },
                         status=404,
                     )
@@ -479,7 +452,6 @@ class ComicLookupAPIView(APIView):
                     normalized_name = self.normalize_publisher_name(raw_publisher_name)
 
                     pub_code = self.PUBLISHER_CODES.get(raw_publisher_name, "UNK")
-
                     if pub_code == "UNK":
                         for known_name, code in self.PUBLISHER_CODES.items():
                             if normalized_name in self.normalize_publisher_name(
@@ -509,21 +481,21 @@ class ComicLookupAPIView(APIView):
                         or cv_issue.get("image", {}).get("small_url")
                         or ""
                     )
+                    clean_desc = strip_html(
+                        cv_issue.get("description") or cv_issue.get("deck") or ""
+                    )
 
                     variant = {
                         "metron_id": cv_issue.get("id"),
                         "variant": variant_val,
                         "display_name": display_name,
                         "image_url": image_url,
-                        "description": cv_issue.get("description")
-                        or cv_issue.get("deck")
-                        or "",
+                        "description": clean_desc,
                         "cover_date": cv_issue.get("cover_date") or "Unknown",
                         "store_date": cv_issue.get("store_date") or "Unknown",
                         "upc": None,
                         "is_scanned_match": False,
                     }
-
                     variants_list.append(variant)
 
                     if main_variant is None:
@@ -534,7 +506,7 @@ class ComicLookupAPIView(APIView):
                         main_publisher = raw_publisher_name
                         main_cover_date = variant["cover_date"]
                         main_store_date = variant["store_date"]
-                        main_description = variant["description"]
+                        main_description = clean_desc
                         main_image_url = image_url
 
                 ipn = f"CB_{main_pub_code}_{self.shorten_series_name(main_series)}-{main_issue_number.zfill(3)}"
@@ -555,7 +527,6 @@ class ComicLookupAPIView(APIView):
                     "metron_id": None,
                     "image_url": main_image_url,
                     "part_link": "",
-                    # New WhatNot fields
                     "listed_on_whatnot": False,
                     "whatnot_price": "",
                 }
@@ -566,7 +537,7 @@ class ComicLookupAPIView(APIView):
                         "comic_data": comic_data,
                         "variants": variants_list,
                         "scanned_barcode": "",
-                        "message": f"Found {len(variants_list)} results for '{query}' via Comic Vine",
+                        "message": "Collected search returns for target string via Comic Vine",
                     },
                     status=200,
                 )

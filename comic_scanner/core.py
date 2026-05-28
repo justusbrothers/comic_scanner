@@ -1,46 +1,36 @@
-"""
-Comic Single-Issue Scanner Plugin for InvenTree
-Focus: Detect and lookup single-issue comic books (floppies) via UPC barcodes.
-Dry mode: Logs simulated part data without creating anything.
-"""
-
 import logging
+from django.urls import path
 
 from plugin import InvenTreePlugin
-from plugin.mixins import SettingsMixin, UrlsMixin, UserInterfaceMixin
+from plugin.mixins import UrlsMixin, UserInterfaceMixin
 
+# Use the standard InvenTree logger so messages appear in Docker logs
 logger = logging.getLogger("inventree")
 
+PLUGIN_VERSION = "1.0.0"
 
-class ComicScanner(SettingsMixin, UrlsMixin, UserInterfaceMixin, InvenTreePlugin):
-    ADMIN_SOURCE = "Settings.js:renderPluginSettings"
-    AUTHOR = "Just Us Brothers"
-    DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
-    LICENSE = "MIT"
+
+class ComicScannerPlugin(UrlsMixin, UserInterfaceMixin, InvenTreePlugin):
+    TITLE = "ComicScanner"
     NAME = "ComicScanner"
-    SETTINGS = {
-        "DRY_RUN": {
-            "name": "Dry Run Mode (Default)",
-            "description": "Default state for dry run in panel (can be toggled in UI)",
-            "default": True,
-            "choices": [(True, "Enabled"), (False, "Disabled")],
-        },
-    }
     SLUG = "comic_scanner"
-    TITLE = "Comic Scanner"
-    VERSION = "0.0.1"
+    VERSION = PLUGIN_VERSION
+
+    # Optional Metadata
+    DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
+    AUTHOR = "Just Us Brothers"
+    WEBSITE = "https://justusbrothers.shop"
+    LICENSE = "MIT"
 
     def setup_urls(self):
-        from django.urls import path
-        from .views import (
-            ComicLookupAPIView,
-            ExampleView,
-        )
+        """
+        Register the URLs for the plugin.
+        Note: The .views import is kept inside here to avoid
+        circular import issues during startup.
+        """
+        from .views import ComicLookup as ComicLookupView
 
-        return [
-            path("comic-lookup/", ComicLookupAPIView.as_view(), name="comic-lookup"),
-            path("example/", ExampleView.as_view(), name="example-view"),
-        ]
+        return [path("comic-lookup/", ComicLookupView.as_view(), name="comic-lookup")]
 
     def get_ui_panels(self, request, context: dict, **kwargs):
         panels = []
@@ -53,38 +43,7 @@ class ComicScanner(SettingsMixin, UrlsMixin, UserInterfaceMixin, InvenTreePlugin
                 "source": self.plugin_static_file("Panel.js:renderComicScannerPanel"),
                 "title": "Comic Scanner",
             })
-
         return panels
-
-    def shorten_series_name(self, name: str) -> str:
-        if not name:
-            return "UNKNOWN"
-        name = name.strip().upper()
-        for prefix in [
-            "THE ",
-            "A ",
-            "AN ",
-            "VOL. ",
-            "VOLUME ",
-            "SERIES ",
-            "VOL ",
-            "V ",
-            "(2020)",
-            "(2018)",
-            "(2019)",
-            "(2021)",
-            "(2022)",
-            "(2023)",
-            "(2024)",
-            "(2025)",
-            "/ ",
-            " /",
-            "THE SHADOW / ",
-            "BATMAN / ",
-        ]:
-            name = name.replace(prefix, "")
-        name = "".join(c for c in name if c.isalnum())
-        return name[:20]
 
     def scan(self, barcode_data):
         return {

@@ -78,10 +78,13 @@ const PUBLISHER_CODES: Record<string, string> = {
   'DC Comics': 'DC',
   'IDW Publishing': 'IDW',
   'Image Comics': 'IMG',
+  'Indie Comics': 'IND',
   'Mad Cave Comics': 'MAD',
   'Marvel Comics': 'MAR',
+  'Oni Press': 'ONI',
   'Valiant Entertainment': 'VAL',
-  'Vault Comics': 'VAU'
+  'Vault Comics': 'VAU',
+  'Vertigo Comics': 'VER'
 };
 
 const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
@@ -89,6 +92,7 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '071486': 'MAR',
   '59606': 'MAR',
   '60196': 'MAD',
+  '64985': 'ONI',
   // '65946': '???',
   '704': 'IMG',
   '709': 'IMG',
@@ -111,8 +115,10 @@ const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
   DYN: 105,
   IDW: 24,
   IMG: 4,
+  IND: 22,
   MAD: 108,
   MAR: 5,
+  ONI: 107,
   VAL: 23,
   VAU: 109,
   VER: 26
@@ -127,8 +133,10 @@ const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
   DYN: 94,
   IDW: 76,
   IMG: 70,
+  IND: 82,
   MAD: 98,
   MAR: 66,
+  ONI: 97,
   VAL: 80,
   VAU: 99,
   VER: 84
@@ -153,12 +161,14 @@ const truncateDescription = (text: string, maxLength: number = 250): string => {
   if (trimmed.length <= maxLength) return trimmed;
 
   // Truncate and add ellipsis
-  return trimmed.substring(0, maxLength - 3) + '...';
+  return `${trimmed.substring(0, maxLength - 3)}...`;
 };
 
 let upcTemplatePkCache: number | null = null;
 
 function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
+  const [manualEntryMode, setManualEntryMode] = useState(false);
+
   const [barcodeInput, setBarcodeInput] = useState('');
   const [metronIdInput, setMetronIdInput] = useState('');
   const [queryInput, setQueryInput] = useState('');
@@ -347,7 +357,79 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     }
   };
 
+  const handleManualEntry = () => {
+    setError(null);
+    setLookupResult(null);
+    setSelectedVariant(null);
+    setExistingPartPk(null);
+    setCreatedOrUpdatedPart(null);
+
+    setManualEntryMode(true);
+
+    // Create empty/default comic shell
+    const emptyComic: ComicData = {
+      title: '',
+      ipn_proposed: '',
+      series: '',
+      issue: '',
+      volume: '',
+      publisher: '',
+      pub_code: '',
+      cover_date: '',
+      store_date: '',
+      variant: '',
+      description: '',
+      metron_url: '',
+      metron_id: null,
+      image_url: '',
+      part_link: '',
+      default_category: 1,
+      listed_on_whatnot: false,
+      whatnot_price: ''
+    };
+
+    const manualVariant: Variant = {
+      metron_id: 0,
+      variant: 'Manual',
+      display_name: '',
+      image_url: '',
+      description: '',
+      cover_date: '',
+      store_date: '',
+      upc: '',
+      is_scanned_match: false
+    };
+
+    setLookupResult({
+      defaultComic: emptyComic,
+      variants: [manualVariant],
+      scannedBarcode: ''
+    });
+
+    setSelectedVariant(manualVariant);
+
+    setEditedData({
+      title: '',
+      description: '',
+      image_url: '',
+      cover_date: '',
+      store_date: '',
+      ipn_proposed: ''
+    });
+
+    setEditedUPC('');
+    setSelectedCategory(1);
+
+    setIncludeTitle(true);
+    setIncludeIPN(true);
+    setIncludeDescription(true);
+    setIncludeImage(true);
+    setIncludeUPC(true);
+  };
+
   useEffect(() => {
+    if (manualEntryMode) return;
+
     if (selectedVariant && lookupResult) {
       const baseIpn = lookupResult.defaultComic.ipn_proposed;
       const variantIpn = getVariantIpn(baseIpn, selectedVariant.variant);
@@ -388,10 +470,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     if (upcTemplatePkCache !== null) return upcTemplatePkCache;
 
     try {
-      const res = await context.api.get('/api/part/parameter/template/', {
-        params: { name: 'UPC' }
+      // 1. Fetch using the new global endpoint and 'search' param
+      const res = await context.api.get('/api/parameter/template/', {
+        params: { search: 'UPC' }
       });
 
+      // Handle paginated (.results) or unpaginated arrays safely
       const templates: any[] = res.data?.results || res.data || [];
 
       if (templates.length > 0) {
@@ -404,15 +488,14 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
-      const createRes = await context.api.post(
-        '/api/part/parameter/template/',
-        {
-          name: 'UPC',
-          description: 'Universal Product Code (barcode)',
-          data_type: 'string',
-          default_value: 'N/A'
-        }
-      );
+      // 2. Create using the new global endpoint and valid fields
+      const createRes = await context.api.post('/api/parameter/template/', {
+        name: 'UPC',
+        description: 'Universal Product Code (barcode)',
+        units: '',
+        checkbox: false,
+        choices: ''
+      });
 
       if (createRes.data?.pk) {
         upcTemplatePkCache = createRes.data.pk;
@@ -445,18 +528,27 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       if (isBoolean && dataValue === 'false') return;
       if (!isBoolean && !dataValue) return;
 
-      const existingRes = await context.api.get('/api/part/parameter/', {
-        params: { part: partPk, template: templatePk }
+      // 1. Update the GET route and change 'part' param to 'model_id'
+      const existingRes = await context.api.get('/api/parameter/', {
+        params: { model_id: partPk, template: templatePk }
       });
 
-      if (existingRes.data?.count > 0) {
-        const paramId = existingRes.data.results[0].pk;
-        await context.api.patch(`/api/part/parameter/${paramId}/`, {
+      // Handle both paginated (.results) or raw array responses safely
+      const existingItems = existingRes.data?.results || existingRes.data || [];
+      const hasExisting =
+        existingRes.data?.count > 0 || existingItems.length > 0;
+
+      if (hasExisting) {
+        const paramId = existingItems[0].pk;
+        // 2. Update PATCH route
+        await context.api.patch(`/api/parameter/${paramId}/`, {
           data: dataValue
         });
       } else {
-        await context.api.post('/api/part/parameter/', {
-          part: partPk,
+        // 3. Update POST route and use 'model_id' in the request payload
+        await context.api.post('/api/parameter/', {
+          model_type: 'part.part',
+          model_id: partPk,
           template: templatePk,
           data: dataValue
         });
@@ -596,18 +688,29 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         const upcTemplatePk = await ensureUpcTemplate();
         if (upcTemplatePk) {
           const trimmedUPC = editedUPC.trim();
-          const existingRes = await context.api.get('/api/part/parameter/', {
-            params: { part: partPk, template: upcTemplatePk }
+
+          // 1. Update GET route and change 'part' to 'model_id'
+          const existingRes = await context.api.get('/api/parameter/', {
+            params: { model_id: partPk, template: upcTemplatePk }
           });
 
-          if (existingRes.data.count > 0) {
-            const paramId = existingRes.data.results[0].pk;
-            await context.api.patch(`/api/part/parameter/${paramId}/`, {
+          // Handle array vs paginated response object safely
+          const existingItems =
+            existingRes.data?.results || existingRes.data || [];
+          const hasExisting =
+            existingRes.data?.count > 0 || existingItems.length > 0;
+
+          if (hasExisting) {
+            const paramId = existingItems[0].pk;
+            // 2. Update PATCH route
+            await context.api.patch(`/api/parameter/${paramId}/`, {
               data: trimmedUPC
             });
           } else {
-            await context.api.post('/api/part/parameter/', {
-              part: partPk,
+            // 3. Update POST route and use 'model_id' in payload
+            await context.api.post('/api/parameter/', {
+              model_type: 'part.part',
+              model_id: partPk,
               template: upcTemplatePk,
               data: trimmedUPC
             });
@@ -745,19 +848,29 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           leftSection={<IconSearch />}
         />
 
-        <Button
-          onClick={handleLookupClick}
-          loading={loading}
-          disabled={
-            loading ||
-            (!barcodeInput.trim() &&
-              !metronIdInput.trim() &&
-              !queryInput.trim())
-          }
-          fullWidth
-        >
-          Lookup
-        </Button>
+        <Group grow>
+          <Button
+            onClick={handleLookupClick}
+            loading={loading}
+            disabled={
+              loading ||
+              (!barcodeInput.trim() &&
+                !metronIdInput.trim() &&
+                !queryInput.trim())
+            }
+          >
+            Lookup
+          </Button>
+
+          <Button
+            variant='light'
+            color='gray'
+            onClick={handleManualEntry}
+            disabled={loading}
+          >
+            Manual Entry
+          </Button>
+        </Group>
       </Stack>
 
       {loading && <Loader />}
@@ -770,75 +883,77 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       {lookupResult && activeComic && selectedVariant && (
         <>
           <Group grow align='flex-start' mt='xl'>
-            <Stack style={{ flex: 1 }}>
-              <Title order={5}>
-                Select Variant ({lookupResult.variants.length})
-              </Title>
+            {!manualEntryMode && (
+              <Stack style={{ flex: 1 }}>
+                <Title order={5}>
+                  Select Variant ({lookupResult.variants.length})
+                </Title>
 
-              {lookupResult.variants.length > 30 && (
-                <Alert color='orange' title='Large number of matches'>
-                  Many results – pick the correct cover based on
-                  image/description.
-                </Alert>
-              )}
+                {lookupResult.variants.length > 30 && (
+                  <Alert color='orange' title='Large number of matches'>
+                    Many results – pick the correct cover based on
+                    image/description.
+                  </Alert>
+                )}
 
-              <Table highlightOnHover withTableBorder>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th />
-                    <Table.Th>Cover</Table.Th>
-                    <Table.Th>Name</Table.Th>
-                    <Table.Th>UPC</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {lookupResult.variants.map((v) => (
-                    <Table.Tr
-                      key={v.metron_id}
-                      onClick={() => setSelectedVariant(v)}
-                      style={{ cursor: 'pointer' }}
-                      bg={
-                        selectedVariant.metron_id === v.metron_id
-                          ? 'var(--mantine-color-blue-light)'
-                          : undefined
-                      }
-                    >
-                      <Table.Td>
-                        {selectedVariant.metron_id === v.metron_id && (
-                          <IconCheck color='green' />
-                        )}
-                      </Table.Td>
-                      <Table.Td>
-                        {v.image_url ? (
-                          <Image
-                            src={v.image_url}
-                            alt={v.variant}
-                            width={60}
-                            height={90}
-                            fit='contain'
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </Table.Td>
-                      <Table.Td>{v.display_name}</Table.Td>
-                      <Table.Td>
-                        {v.is_scanned_match ? (
-                          <IconCheck
-                            color='green'
-                            title='Matches scanned barcode'
-                          />
-                        ) : v.upc ? (
-                          'Other'
-                        ) : (
-                          '—'
-                        )}
-                      </Table.Td>
+                <Table highlightOnHover withTableBorder>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th />
+                      <Table.Th>Cover</Table.Th>
+                      <Table.Th>Name</Table.Th>
+                      <Table.Th>UPC</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Stack>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {lookupResult.variants.map((v) => (
+                      <Table.Tr
+                        key={v.metron_id}
+                        onClick={() => setSelectedVariant(v)}
+                        style={{ cursor: 'pointer' }}
+                        bg={
+                          selectedVariant.metron_id === v.metron_id
+                            ? 'var(--mantine-color-blue-light)'
+                            : undefined
+                        }
+                      >
+                        <Table.Td>
+                          {selectedVariant.metron_id === v.metron_id && (
+                            <IconCheck color='green' />
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          {v.image_url ? (
+                            <Image
+                              src={v.image_url}
+                              alt={v.variant}
+                              width={60}
+                              height={90}
+                              fit='contain'
+                            />
+                          ) : (
+                            '—'
+                          )}
+                        </Table.Td>
+                        <Table.Td>{v.display_name}</Table.Td>
+                        <Table.Td>
+                          {v.is_scanned_match ? (
+                            <IconCheck
+                              color='green'
+                              title='Matches scanned barcode'
+                            />
+                          ) : v.upc ? (
+                            'Other'
+                          ) : (
+                            '—'
+                          )}
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Stack>
+            )}
 
             <Stack style={{ flex: 1 }}>
               <Alert
@@ -1073,11 +1188,16 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                           { value: '1', label: 'Comic Books (Default)' },
                           { value: '2', label: 'Dark Horse Comics' },
                           { value: '3', label: 'DC Comics' },
-                          { value: '4', label: 'Image Comics' },
-                          { value: '5', label: 'Marvel Comics' },
-                          { value: '23', label: 'Valiant Entertainment' },
+                          { value: '105', label: 'Dynamite Comics' },
                           { value: '24', label: 'IDW Publishing' },
-                          { value: '105', label: 'Dynamite Comics' }
+                          { value: '4', label: 'Image Comics' },
+                          { value: '22', label: 'Indie Comics' },
+                          { value: '108', label: 'Mad Cave Comics' },
+                          { value: '5', label: 'Marvel Comics' },
+                          { value: '107', label: 'Oni Press' },
+                          { value: '23', label: 'Valiant Entertainment' },
+                          { value: '109', label: 'Vault Comics' },
+                          { value: '26', label: 'Vertigo Comics' }
                         ]}
                         placeholder='Select part category'
                         searchable
@@ -1225,6 +1345,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             <Button
               variant='outline'
               onClick={() => {
+                setManualEntryMode(false);
                 setLookupResult(null);
                 setSelectedVariant(null);
                 setBarcodeInput('');
