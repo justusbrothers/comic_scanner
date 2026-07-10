@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from part.models import Part
 
+from . import constants
+
 logger = logging.getLogger("inventree")
 
 
@@ -62,62 +64,6 @@ class ExampleView(APIView):
 
 class ComicLookup(APIView):
     permission_classes = [IsAuthenticated]
-
-    # --- BLOWN OUT CODES & SHIT ---
-    PUBLISHER_CODES = {
-        "Archie Comics": "ARCH",
-        "Bad Idea Comics": "BAD",
-        "Boom! Studios": "BOOM",
-        "DC Comics": "DC",
-        "Dark Horse Comics": "DHC",
-        "Dynamite Comics": "DYN",
-        "IDW Publishing": "IDW",
-        "Image Comics": "IMG",
-        "Indie Comics": "IND",
-        "Mad Cave Comics": "MAD",
-        "Marvel Comics": "MAR",
-        "Oni Press": "ONI",
-        "Valiant Entertainment": "VAL",
-        "Vault Comics": "VAU",
-        "Vertigo Comics": "VER",
-    }
-
-    PUBLISHER_PART_CATEGORIES = {
-        "ARCH": 1,
-        "BAD": 22,
-        "BOOM": 1,
-        "DC": 3,
-        "DHC": 2,
-        "DYN": 105,
-        "IDW": 24,
-        "IMG": 4,
-        "IND": 22,
-        "MAD": 108,
-        "MAR": 5,
-        "ONI": 107,
-        "VAL": 23,
-        "VAU": 109,
-        "VER": 26,
-    }
-
-    PUBLISHER_UPC_PREFIXES = {
-        "070989": "DC",
-        "071486": "MAR",
-        "59606": "MAR",
-        "60196": "MAD",
-        "64985": "ONI",
-        "704": "IMG",
-        "709": "IMG",
-        "70985": "IMG",
-        "72513": "DYN",
-        "759606": "MAR",
-        "761568": "DHC",
-        "761941": "DC",
-        "827": "IDW",
-        "85001": "BAD",
-        "85005": "VAU",
-    }
-    # ------------------------------
 
     def shorten_series_name(self, name, max_len=14):
         return "".join(c for c in name.upper() if c.isalnum())[:max_len]
@@ -179,6 +125,92 @@ class ComicLookup(APIView):
             "InvenTree-ComicScanner/1.0 (info@justusbrothers.shop; custom plugin)"
         )
 
+        # ==================== PRICE LOOKUP HELPER ====================
+        def enrich_with_price(
+            comic_data: dict,
+            series_name: str,
+            issue_number: str,
+            publisher: str = "",
+            cover_date=None,
+        ):
+            """Enrich comic data with price information from available sources."""
+            price_info = {
+                "estimated_price": None,
+                "price_source": "none",
+                "last_sold": None,
+                "price_note": "",
+            }
+
+            if not comic_vine_key:
+                price_info["price_note"] = (
+                    "Comic Vine key missing - price lookup disabled"
+                )
+                comic_data.update(price_info)
+                return
+
+            try:
+                # Search Comic Vine for more detailed issue data (sometimes contains value hints)
+                search_url = "https://comicvine.gamespot.com/api/search/"
+                params = {
+                    "api_key": comic_vine_key,
+                    "format": "json",
+                    "query": f"{series_name} {issue_number}",
+                    "resources": "issue",
+                    "field_list": "id,name,issue_number,volume,price,deck,description,cover_date,store_date",
+                    "limit": 5,
+                }
+
+                resp = requests.get(
+                    search_url,
+                    params=params,
+                    headers={"User-Agent": user_agent},
+                    timeout=12,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("status_code") == 1 and data.get("results"):
+                    best_match = data["results"][0]
+
+                    # Comic Vine rarely has a direct "price" field, but we check anyway
+                    raw_price = best_match.get("price")
+                    if raw_price:
+                        try:
+                            price_info["estimated_price"] = float(raw_price)
+                            price_info["price_source"] = "Comic Vine"
+                        except Exception:
+                            pass
+
+                    # Fallback: look for price mentions in deck/description
+                    if not price_info["estimated_price"]:
+                        text = (
+                            (best_match.get("deck") or "")
+                            + " "
+                            + (best_match.get("description") or "")
+                        )
+                        price_matches = re.findall(r"\$([0-9,]+\.?\d*)", text)
+                        if price_matches:
+                            try:
+                                price_info["estimated_price"] = float(
+                                    price_matches[0].replace(",", "")
+                                )
+                                price_info["price_source"] = "Comic Vine (parsed)"
+                            except Exception:
+                                pass
+
+                    price_info["price_note"] = (
+                        f"Cover date: {best_match.get('cover_date', 'Unknown')}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Price enrichment failed for {series_name} #{issue_number}: {e}"
+                )
+                price_info["price_note"] = "Price lookup error"
+
+            comic_data.update(price_info)
+
+        # ==================== BARCODE MODE ====================
         if mode == "barcode":
             logger.info("ComicScanner: Processing barcode %s", barcode)
             if len(barcode) < 12:
@@ -201,24 +233,24 @@ class ComicLookup(APIView):
                 original_barcode = barcode
                 standard_barcode = original_barcode
                 base_upc = original_barcode[:12]
-
                 if len(original_barcode) >= 17:
                     standard_barcode = original_barcode[:-2] + "11"
 
                 test_upcs = [standard_barcode, base_upc, original_barcode]
-                full_anchor = None
                 issue_id = None
+                full_anchor = None
 
                 if MOKKARI_AVAILABLE:
                     try:
                         api = mokkari.api(metron_user, metron_pass)
                         for test_upc in test_upcs:
-                            issues = api.issues_list({"upc": test_upc})
-                            if not issues:
-                                issues = api.issues_list({"sku": test_upc})
+                            issues = api.issues_list({
+                                "upc": test_upc
+                            }) or api.issues_list({"sku": test_upc})
                             if issues:
                                 issue_id = issues[0].id
                                 issue = api.issue(issue_id)
+                                # Build full_anchor from Mokkari object
                                 full_anchor = {
                                     "id": issue.id,
                                     "series": {
@@ -256,6 +288,7 @@ class ComicLookup(APIView):
                             "Mokkari lookup failed, falling back: %s", mk_err
                         )
 
+                # Fallback to direct Metron API if needed
                 if not issue_id:
                     for test_upc in test_upcs:
                         for param in ["upc", "sku"]:
@@ -291,6 +324,7 @@ class ComicLookup(APIView):
                         status=404,
                     )
 
+                # === Build comic_data (existing logic) ===
                 series_dict = full_anchor.get("series", {})
                 series_name = series_dict.get("name", "").strip()
                 volume = series_dict.get("volume")
@@ -302,22 +336,22 @@ class ComicLookup(APIView):
                 raw_publisher_name = publisher_dict.get("name", "Unknown Publisher")
                 normalized_name = self.normalize_publisher_name(raw_publisher_name)
 
-                pub_code = self.PUBLISHER_CODES.get(raw_publisher_name, "UNK")
+                pub_code = constants.PUBLISHER_CODES.get(raw_publisher_name, "UNK")
                 if pub_code == "UNK":
-                    for known_name, code in self.PUBLISHER_CODES.items():
+                    for known_name, code in constants.PUBLISHER_CODES.items():
                         if normalized_name in self.normalize_publisher_name(known_name):
                             pub_code = code
                             break
 
                 if pub_code == "UNK" and len(original_barcode) >= 6:
                     for prefix in sorted(
-                        self.PUBLISHER_UPC_PREFIXES.keys(), key=len, reverse=True
+                        constants.PUBLISHER_UPC_PREFIXES.keys(), key=len, reverse=True
                     ):
                         if original_barcode.startswith(prefix):
-                            pub_code = self.PUBLISHER_UPC_PREFIXES[prefix]
+                            pub_code = constants.PUBLISHER_UPC_PREFIXES[prefix]
                             break
 
-                category = self.PUBLISHER_PART_CATEGORIES.get(pub_code, 1)
+                category = constants.PUBLISHER_PART_CATEGORIES.get(pub_code, 1)
                 raw_variant = (
                     full_anchor.get("variant") or full_anchor.get("cover") or ""
                 ).strip()
@@ -338,8 +372,42 @@ class ComicLookup(APIView):
                     full_anchor.get("desc") or full_anchor.get("description", "")
                 )
 
+                ipn = f"CB_{pub_code}_{self.shorten_series_name(series_name)}-{issue_number.zfill(3)}"
+                if volume and str(volume) != "1":
+                    ipn = f"CB_{pub_code}_{self.shorten_series_name(series_name)}_V{volume}-{issue_number.zfill(3)}"
+
+                comic_data = {
+                    "title": f"{series_name} #{issue_number}{display_suffix}",
+                    "ipn_proposed": ipn,
+                    "series": series_name,
+                    "issue": str(issue_number),
+                    "volume": str(volume) if volume else None,
+                    "publisher": raw_publisher_name,
+                    "category": category,
+                    "pub_code": pub_code,
+                    "cover_date": str(cover_date or "Unknown"),
+                    "store_date": str(store_date or "Unknown"),
+                    "variant": variant_val,
+                    "description": clean_description,
+                    "metron_url": f"https://metron.cloud/issue/{full_anchor.get('id')}/",
+                    "metron_id": int(full_anchor.get("id")),
+                    "image_url": str(full_anchor.get("image", "")),
+                    "part_link": f"https://metron.cloud/issue/{full_anchor.get('id')}/",
+                    "listed_on_whatnot": False,
+                    "whatnot_price": "",
+                }
+
+                # === ADD PRICE LOOKUP ===
+                enrich_with_price(
+                    comic_data,
+                    series_name,
+                    issue_number,
+                    raw_publisher_name,
+                    cover_date,
+                )
+
                 main_variant = {
-                    "metron_id": int(full_anchor.get("id")),  # Ensure ID is an integer
+                    "metron_id": int(full_anchor.get("id")),
                     "variant": variant_val,
                     "display_name": f"{series_name} #{issue_number}{display_suffix}",
                     "image_url": str(full_anchor.get("image", "")),
@@ -350,35 +418,6 @@ class ComicLookup(APIView):
                     "is_scanned_match": True,
                 }
 
-                ipn = f"CB_{pub_code}_{self.shorten_series_name(series_name)}-{issue_number.zfill(3)}"
-                if volume and str(volume) != "1":
-                    ipn = f"CB_{pub_code}_{self.shorten_series_name(series_name)}_V{volume}-{issue_number.zfill(3)}"
-
-                comic_data = {
-                    "title": f"{series_name} #{issue_number}{display_suffix}",
-                    "ipn_proposed": ipn,
-                    "series": series_name,
-                    "issue": str(issue_number),  # Ensure issue is string
-                    "volume": str(volume) if volume else None,
-                    "publisher": raw_publisher_name,
-                    "default_category": category,
-                    "pub_code": pub_code,
-                    "cover_date": str(cover_date or "Unknown"),
-                    "store_date": str(store_date or "Unknown"),
-                    "variant": variant_val,
-                    "description": clean_description,
-                    "metron_url": str(
-                        f"https://metron.cloud/issue/{full_anchor.get('id')}/"
-                    ),
-                    "metron_id": int(full_anchor.get("id")),
-                    "image_url": str(full_anchor.get("image", "")),
-                    "part_link": str(
-                        f"https://metron.cloud/issue/{full_anchor.get('id')}/"
-                    ),
-                    "listed_on_whatnot": False,
-                    "whatnot_price": "",
-                }
-
                 return Response(
                     {
                         "success": True,
@@ -386,7 +425,7 @@ class ComicLookup(APIView):
                         "variants": [main_variant],
                         "scanned_barcode": original_barcode,
                         "standard_barcode_used": standard_barcode,
-                        "message": "Matched base issue",
+                        "message": "Matched base issue with price enrichment",
                     },
                     status=200,
                 )
@@ -395,9 +434,10 @@ class ComicLookup(APIView):
                 logger.exception("ComicScanner: Barcode lookup failed")
                 return Response({"success": False, "message": str(e)}, status=500)
 
+        # (Metron ID and Query modes omitted for brevity - let me know if you want those patched too)
         elif mode == "metron_id":
             return Response(
-                {"success": False, "message": "Metron ID execution mode absent"},
+                {"success": False, "message": "Metron ID mode not yet implemented"},
                 status=400,
             )
 
@@ -451,9 +491,9 @@ class ComicLookup(APIView):
                     raw_publisher_name = publisher_info.get("name", "Unknown Publisher")
                     normalized_name = self.normalize_publisher_name(raw_publisher_name)
 
-                    pub_code = self.PUBLISHER_CODES.get(raw_publisher_name, "UNK")
+                    pub_code = constants.PUBLISHER_CODES.get(raw_publisher_name, "UNK")
                     if pub_code == "UNK":
-                        for known_name, code in self.PUBLISHER_CODES.items():
+                        for known_name, code in constants.PUBLISHER_CODES.items():
                             if normalized_name in self.normalize_publisher_name(
                                 known_name
                             ):

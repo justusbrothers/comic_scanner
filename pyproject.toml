@@ -28,7 +28,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://justusbrothers.shop"
+Homepage = "https://inventree.justusbros.shop"
 
 [project.entry-points."inventree_plugins"]
 comic_scanner = "comic_scanner.core:ComicScannerPlugin"

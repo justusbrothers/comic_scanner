@@ -4,7 +4,6 @@ from django.urls import path
 from plugin import InvenTreePlugin
 from plugin.mixins import UrlsMixin, UserInterfaceMixin
 
-# Use the standard InvenTree logger so messages appear in Docker logs
 logger = logging.getLogger("inventree")
 
 PLUGIN_VERSION = "1.0.0"

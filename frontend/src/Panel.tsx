@@ -44,9 +44,14 @@ interface ComicData {
   metron_id: number | null;
   image_url: string;
   part_link: string;
-  default_category?: number;
+  category?: number;
   listed_on_whatnot: boolean;
   whatnot_price: string;
+
+  // Price lookup fields from backend
+  estimated_price?: number | null;
+  price_source?: string;
+  price_note?: string;
 }
 
 interface Variant {
@@ -71,16 +76,22 @@ interface LookupResponse {
 
 /* -------------------- Publisher Defaults -------------------- */
 const PUBLISHER_CODES: Record<string, string> = {
+  'Abstract Studio': 'ABS',
+  'Action Lab Comics': 'ALC',
   'Archie Comics': 'ARCH',
   'Bad Idea Studios': 'BAD',
   'Boom! Studios': 'BOOM',
   'Dark Horse Comics': 'DHC',
   'DC Comics': 'DC',
+  "Devil's Due Comics": 'DD',
   'IDW Publishing': 'IDW',
   'Image Comics': 'IMG',
   'Indie Comics': 'IND',
+  'Iron Age Comics': 'IAC',
+  Keenspot: 'KS',
   'Mad Cave Comics': 'MAD',
   'Marvel Comics': 'MAR',
+  'Midnight Factory': 'MID',
   'Oni Press': 'ONI',
   'Valiant Entertainment': 'VAL',
   'Vault Comics': 'VAU',
@@ -92,8 +103,10 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '071486': 'MAR',
   '59606': 'MAR',
   '60196': 'MAD',
+  '60283': 'KS',
+  '60554': 'IAC',
   '64985': 'ONI',
-  // '65946': '???',
+  '68267': 'DD',
   '704': 'IMG',
   '709': 'IMG',
   '70985': 'IMG',
@@ -101,23 +114,32 @@ const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
   '759606': 'MAR',
   '761568': 'DHC',
   '761941': 'DC',
+  '78200': 'MID',
+  '78430': 'ALC',
   '827': 'IDW',
   '85001': 'BAD',
-  '85005': 'VAU'
+  '85005': 'VAU',
+  '89317': 'ABS'
 };
 
 const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
+  ABS: 22,
+  ALC: 22,
   ARCH: null,
   BAD: 22,
   BOOM: null,
   DC: 3,
+  DD: 22,
   DHC: 2,
   DYN: 105,
+  IAC: 22,
   IDW: 24,
   IMG: 4,
   IND: 22,
+  KS: 110,
   MAD: 108,
   MAR: 5,
+  MID: 22,
   ONI: 107,
   VAL: 23,
   VAU: 109,
@@ -125,17 +147,23 @@ const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
 };
 
 const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
+  ABS: 82,
+  ALC: 82,
   ARCH: null,
   BAD: 82,
   BOOM: null,
   DC: 91,
+  DD: 82,
   DHC: 73,
   DYN: 94,
+  IAC: 82,
   IDW: 76,
   IMG: 70,
   IND: 82,
+  KS: 100,
   MAD: 98,
   MAR: 66,
+  MID: 82,
   ONI: 97,
   VAL: 80,
   VAU: 99,
@@ -160,7 +188,6 @@ const truncateDescription = (text: string, maxLength: number = 250): string => {
   const trimmed = text.trim();
   if (trimmed.length <= maxLength) return trimmed;
 
-  // Truncate and add ellipsis
   return `${trimmed.substring(0, maxLength - 3)}...`;
 };
 
@@ -218,7 +245,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     return input.replace(/[^0-9]/g, '');
   };
 
-  /** Generate variant-aware IPN (e.g. CB_MAR_Batman-001-COVERA) */
+  /** Generate variant-aware IPN */
   const getVariantIpn = (baseIpn: string, variantName: string): string => {
     if (
       !variantName ||
@@ -308,10 +335,30 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
       setEditedUPC(data.scanned_barcode || '');
 
-      setListedOnWhatnot(data.comic_data.listed_on_whatnot || false);
-      setWhatnotAuctionPrice(data.comic_data.whatnot_price || '');
+      // ====================== PRICE AUTO-FILL ======================
+      const comic = data.comic_data;
+      const hasEstimatedPrice =
+        comic.estimated_price && comic.estimated_price > 0;
 
-      const defaultCat = data.comic_data.default_category || 1;
+      setListedOnWhatnot(hasEstimatedPrice || comic.listed_on_whatnot || false);
+      setWhatnotAuctionPrice(
+        hasEstimatedPrice
+          ? comic.estimated_price!.toFixed(2)
+          : comic.whatnot_price || ''
+      );
+
+      if (hasEstimatedPrice) {
+        notifications.show({
+          title: 'Price Auto-filled',
+          message: `$${comic.estimated_price!.toFixed(2)} from ${comic.price_source || 'lookup'}`,
+          color: 'teal',
+          icon: <IconCheck />,
+          autoClose: 5000
+        });
+      }
+      // ============================================================
+
+      const defaultCat = data.comic_data.category || 1;
       setSelectedCategory(defaultCat);
 
       setIncludeTitle(true);
@@ -366,7 +413,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
     setManualEntryMode(true);
 
-    // Create empty/default comic shell
     const emptyComic: ComicData = {
       title: '',
       ipn_proposed: '',
@@ -383,9 +429,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       metron_id: null,
       image_url: '',
       part_link: '',
-      default_category: 1,
+      category: 1,
       listed_on_whatnot: false,
-      whatnot_price: ''
+      whatnot_price: '',
+      estimated_price: null,
+      price_source: '',
+      price_note: ''
     };
 
     const manualVariant: Variant = {
@@ -419,6 +468,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
     setEditedUPC('');
     setSelectedCategory(1);
+    setListedOnWhatnot(false);
+    setWhatnotAuctionPrice('');
 
     setIncludeTitle(true);
     setIncludeIPN(true);
@@ -470,12 +521,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     if (upcTemplatePkCache !== null) return upcTemplatePkCache;
 
     try {
-      // 1. Fetch using the new global endpoint and 'search' param
       const res = await context.api.get('/api/parameter/template/', {
         params: { search: 'UPC' }
       });
 
-      // Handle paginated (.results) or unpaginated arrays safely
       const templates: any[] = res.data?.results || res.data || [];
 
       if (templates.length > 0) {
@@ -488,7 +537,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
-      // 2. Create using the new global endpoint and valid fields
       const createRes = await context.api.post('/api/parameter/template/', {
         name: 'UPC',
         description: 'Universal Product Code (barcode)',
@@ -528,24 +576,20 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       if (isBoolean && dataValue === 'false') return;
       if (!isBoolean && !dataValue) return;
 
-      // 1. Update the GET route and change 'part' param to 'model_id'
       const existingRes = await context.api.get('/api/parameter/', {
         params: { model_id: partPk, template: templatePk }
       });
 
-      // Handle both paginated (.results) or raw array responses safely
       const existingItems = existingRes.data?.results || existingRes.data || [];
       const hasExisting =
         existingRes.data?.count > 0 || existingItems.length > 0;
 
       if (hasExisting) {
         const paramId = existingItems[0].pk;
-        // 2. Update PATCH route
         await context.api.patch(`/api/parameter/${paramId}/`, {
           data: dataValue
         });
       } else {
-        // 3. Update POST route and use 'model_id' in the request payload
         await context.api.post('/api/parameter/', {
           model_type: 'part.part',
           model_id: partPk,
@@ -578,7 +622,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       title: includeTitle
         ? (editedData.title ?? selectedVariant.display_name)
         : lookupResult.defaultComic.title,
-      // ← NEW: Truncate description automatically
 
       description: includeDescription
         ? truncateDescription(
@@ -689,12 +732,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         if (upcTemplatePk) {
           const trimmedUPC = editedUPC.trim();
 
-          // 1. Update GET route and change 'part' to 'model_id'
           const existingRes = await context.api.get('/api/parameter/', {
             params: { model_id: partPk, template: upcTemplatePk }
           });
 
-          // Handle array vs paginated response object safely
           const existingItems =
             existingRes.data?.results || existingRes.data || [];
           const hasExisting =
@@ -702,12 +743,10 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
           if (hasExisting) {
             const paramId = existingItems[0].pk;
-            // 2. Update PATCH route
             await context.api.patch(`/api/parameter/${paramId}/`, {
               data: trimmedUPC
             });
           } else {
-            // 3. Update POST route and use 'model_id' in payload
             await context.api.post('/api/parameter/', {
               model_type: 'part.part',
               model_id: partPk,
@@ -738,7 +777,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           );
         }
 
-        // Save Condition (PK = 16)
         await ensureParameter(
           partPk,
           'Condition',
@@ -1192,6 +1230,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                           { value: '24', label: 'IDW Publishing' },
                           { value: '4', label: 'Image Comics' },
                           { value: '22', label: 'Indie Comics' },
+                          { value: '110', label: 'Keenspot' },
                           { value: '108', label: 'Mad Cave Comics' },
                           { value: '5', label: 'Marvel Comics' },
                           { value: '107', label: 'Oni Press' },
@@ -1230,7 +1269,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
             )}
           </Stack>
 
-          {/* Additional Part Parameters */}
           <Stack mt='xl' gap='xs'>
             <Title order={5}>Additional Part Parameters</Title>
             <Table withTableBorder>
