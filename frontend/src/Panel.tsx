@@ -74,13 +74,10 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
 
     let partPk: number | null =
       mode === 'update-existing' ? existingPartPk : null;
-    const finalIpn =
-      mode === 'create-variant'
-        ? getVariantIpn(
-            lookupResult.defaultComic.ipn_proposed,
-            selectedVariant.variant
-          )
-        : lookupResult.defaultComic.ipn_proposed;
+    const finalIpn = getVariantIpn(
+      lookupResult.defaultComic.ipn_proposed,
+      selectedVariant.variant
+    );
 
     try {
       const pubCode = determinePublisherCode(
@@ -137,15 +134,6 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
     }
   };
 
-  const activeComic =
-    selectedVariant && lookupResult
-      ? {
-          ...lookupResult.defaultComic,
-          title: editedData.title ?? selectedVariant.display_name,
-          description: editedData.description ?? selectedVariant.description
-        }
-      : (lookupResult?.defaultComic ?? null);
-
   return (
     <Stack p='md'>
       <Title order={3}>Comic Scanner</Title>
@@ -166,7 +154,7 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
         </Alert>
       )}
 
-      {lookupResult && activeComic && selectedVariant && (
+      {lookupResult && selectedVariant && (
         <Group grow align='flex-start' mt='xl'>
           <VariantSelector
             variants={lookupResult.variants}
@@ -174,7 +162,6 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
             onSelectVariant={setSelectedVariant}
           />
           <ComicEditor
-            activeComic={activeComic}
             selectedVariant={selectedVariant}
             editedData={editedData}
             editedUPC={editedUPC}

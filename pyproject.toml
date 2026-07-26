@@ -31,7 +31,7 @@ classifiers = [
 Homepage = "https://inventree.justusbrothers.shop"
 
 [project.entry-points."inventree_plugins"]
-comic_scanner = "comic_scanner.core:ComicScannerPlugin"
+comic_scanner = "comic_scanner.core:Panel"
 
 [tool.setuptools.packages.find]
 where = ["."]

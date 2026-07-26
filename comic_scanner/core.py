@@ -33,7 +33,7 @@ class ComicScannerPlugin(UrlsMixin, UserInterfaceMixin, InvenTreePlugin):
                 "description": "Scan comic UPC, lookup metadata, preview or create part",
                 "icon": "ti:mood-smile:outline",
                 "key": "comic_scanner_panel",
-                "source": self.plugin_static_file("Panel.js:renderComicScannerPanel"),
+                "source": self.plugin_static_file("Panel.js:Panel"),
                 "title": "Comic Scanner",
             })
         return panels

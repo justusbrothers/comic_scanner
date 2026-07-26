@@ -14,7 +14,7 @@ export function VariantSelector({
 }: VariantSelectorProps) {
   return (
     <Stack style={{ flex: 1 }}>
-      <Title order={5}>Select Variant ({variants.length})</Title>
+      <Title order={5}>Select Variant! ({variants.length})</Title>
       {variants.length > 30 && (
         <Alert color='orange' title='Large number of matches'>
           Many results – pick the correct cover based on image/description.

@@ -4,12 +4,13 @@ import { viteExternalsPlugin } from 'vite-plugin-externals';
 
 /**
  * The following libraries are externalized to avoid bundling them with the plugin.
- * These libraries are expected to be provided by the InvenTree core application.
+ * These libraries are provided by the InvenTree core application.
  */
 export const externalLibs: Record<string, string> = {
   react: 'React',
   'react-dom': 'ReactDOM',
   ReactDom: 'ReactDOM',
+  'react/jsx-runtime': 'React',
   '@lingui/core': 'LinguiCore',
   '@lingui/react': 'LinguiReact',
   '@mantine/core': 'MantineCore',
@@ -21,7 +22,7 @@ const externalKeys = Object.keys(externalLibs);
 
 /**
  * Vite config to build the frontend plugin as an exported module.
- * This will be distributed in the 'static' directory of the plugin.
+ * Distributed in the 'static' directory of the plugin.
  */
 export default defineConfig({
   plugins: [
@@ -30,11 +31,8 @@ export default defineConfig({
     }),
     viteExternalsPlugin(externalLibs)
   ],
-  esbuild: {
-    jsx: 'preserve'
-  },
+  // FIX 2: Removed `esbuild: { jsx: 'preserve' }` so JSX compiles to standard JS
   build: {
-    // minify: false,
     target: 'esnext',
     cssCodeSplit: false,
     manifest: true,
