@@ -1,127 +1,264 @@
-# comic_scanner/constants.py
+# constants.py in comic_scanner plugin
 
-# Abstract Studio
-    # "Abstract Studio": "ABS",
-    # "89317": "ABS",
-    # "ABS": 22,
-
-# Action Lab Comics
-    # "Action Lab Comics": "ALC",
-    # "78430": "ALC",
-    # "ALC": 22,
-
-# Iron Age Comics
-    # "Iron Age Comics": "IAC",
-    # "60554": "IAC",
-    # "IAC": 22,
-
-# Midnight Factory
-    # "Midnight Factory": "MID",
-    # "78200": "MID",
-    # "MID": 22,
-
-PUBLISHER_CODES = {
-    "Abstract Studio": "ABS",
-    "Action Lab Comics": "ALC",
-    "Archie Comics": "ARCH",
-    "Bad Idea Comics": "BAD",
-    "Boom! Studios": "BOOM",
-    "DC Comics": "DC",
-    "Devil's Due Comics": "DD",
-    "Dark Horse Comics": "DHC",
-    "Dynamite Comics": "DYN",
-    "IDW Publishing": "IDW",
-    "Image Comics": "IMG",
-    "Indie Comics": "IND",
-    "Iron Age Comics": "IAC",
-    "Keenspot": "KS",
-    "Mad Cave Comics": "MAD",
-    "Marvel Comics": "MAR",
-    "Midnight Factory": "MID",
-    "Oni Press": "ONI",
-    "Valiant Entertainment": "VAL",
-    "Vault Comics": "VAU",
-    "Vertigo Comics": "VER",
-}
-
-PUBLISHER_UPC_PREFIXES = {
-    "070989": "DC",
-    "071486": "MAR",
-    "59606": "MAR",
-    "60196": "MAD",
-    "60283": "KS",
-    "60554": "IAC",
-    "64985": "ONI",
-    "68267": "DD",
-    "704": "IMG",
-    "709": "IMG",
-    "70985": "IMG",
-    "72513": "DYN",
-    "759606": "MAR",
-    "761568": "DHC",
-    "761941": "DC",
-    "78200": "MID",
-    "78430": "ALC",
-    "827": "IDW",
-    "85001": "BAD",
-    "85005": "VAU",
-    "89317": "ABS",
-}
-
-PUBLISHER_PART_CATEGORIES = {
-    "ABS": 22,
-    "ALC": 22,
-    "ARCH": 1,
-    "BAD": 22,
-    "BOOM": 1,
-    "DC": 3,
-    "DD": 22,
-    "DHC": 2,
-    "DYN": 105,
-    "IAC": 22,
-    "IDW": 24,
-    "IMG": 4,
-    "IND": 22,
-    "KS": 110,
-    "MAD": 108,
-    "MAR": 5,
-    "MID": 22,
-    "ONI": 107,
-    "VAL": 23,
-    "VAU": 109,
-    "VER": 26,
-}
-
-# Used to cleanly build lists for UI dropdowns dynamically
-CATEGORIES_LIST = [
-    {"id": 1, "name": "Archie Comics (ARCH)"},
-    {"id": 2, "name": "Dark Horse Comics (DHC)"},
-    {"id": 3, "name": "DC Comics (DC)"},
-    {"id": 4, "name": "Image Comics (IMG)"},
-    {"id": 5, "name": "Marvel Comics (MAR)"},
-    {"id": 22, "name": "Indie / Bad Idea / Devil's Due (IND/BAD/DD)"},
-    {"id": 23, "name": "Valiant Entertainment (VAL)"},
-    {"id": 24, "name": "IDW Publishing (IDW)"},
-    {"id": 26, "name": "Vertigo Comics (VER)"},
-    {"id": 105, "name": "Dynamite Entertainment (DYN)"},
-    {"id": 107, "name": "Oni Press (ONI)"},
-    {"id": 108, "name": "Mad Cave Comics (MAD)"},
-    {"id": 109, "name": "Vault Comics (VAU)"},
-    {"id": 110, "name": "Keenspot (KS)"}
+# -----------------------------------------------------------------
+# 1. THE SINGLE SOURCE OF TRUTH REGISTRY
+# -----------------------------------------------------------------
+# Add, edit, or remove publishers entirely inside this list.
+PUBLISHER_REGISTRY = [
+    {
+        "name": "Abstract Studio",
+        "code": "ABS",
+        "prefixes": ["89317"],
+        "catId": 22,
+        "catLabel": "Abstract Studio",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Action Lab Comics",
+        "code": "ALC",
+        "prefixes": ["78430"],
+        "catId": 22,
+        "catLabel": "Action Lab Comics",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Archie Comics",
+        "code": "ARCH",
+        "prefixes": [],
+        "catId": 22,
+        "catLabel": "Archie Comics (ARCH)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Bad Idea Comics",
+        "code": "BAD",
+        "prefixes": ["85001"],
+        "catId": 22,
+        "catLabel": "Indie (IND)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Boom! Studios",
+        "code": "BOOM",
+        "prefixes": ["84428"],
+        "catId": 22,
+        "catLabel": "Boom! Studios (BOOM)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Dark Horse Comics",
+        "code": "DHC",
+        "prefixes": ["761568"],
+        "catId": 2,
+        "catLabel": "Dark Horse Comics (DHC)",
+        "locId": 73,
+        "locLabel": "Dark Horse Bin (73)",
+    },
+    {
+        "name": "DC Comics",
+        "code": "DC",
+        "prefixes": ["070989", "761941"],
+        "catId": 3,
+        "catLabel": "DC Comics (DC)",
+        "locId": 91,
+        "locLabel": "DC Bin (91)",
+    },
+    {
+        "name": "Devil's Due Comics",
+        "code": "DD",
+        "prefixes": ["68267"],
+        "catId": 22,
+        "catLabel": "Indie (IND)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "DSTLRY",
+        "code": "DST",
+        "prefixes": ["614"],
+        "catId": 22,
+        "catLabel": "Indie (IND)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Dynamite Comics",
+        "code": "DYN",
+        "prefixes": ["72513"],
+        "catId": 105,
+        "catLabel": "Dynamite Entertainment (DYN)",
+        "locId": 94,
+        "locLabel": "Dynamite Bin (94)",
+    },
+    {
+        "name": "IDW Publishing",
+        "code": "IDW",
+        "prefixes": ["827"],
+        "catId": 24,
+        "catLabel": "IDW Publishing (IDW)",
+        "locId": 76,
+        "locLabel": "IDW Bin (76)",
+    },
+    {
+        "name": "Image Comics",
+        "code": "IMG",
+        "prefixes": ["704", "709", "70985"],
+        "catId": 4,
+        "catLabel": "Image Comics (IMG)",
+        "locId": 70,
+        "locLabel": "Image Bin (70)",
+    },
+    {
+        "name": "Indie Comics",
+        "code": "IND",
+        "prefixes": [],
+        "catId": 22,
+        "catLabel": "Indie (IND)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Iron Age Comics",
+        "code": "IAC",
+        "prefixes": ["60554"],
+        "catId": 22,
+        "catLabel": "Iron Age Comics",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Keenspot",
+        "code": "KS",
+        "prefixes": ["60283"],
+        "catId": 110,
+        "catLabel": "Keenspot (KS)",
+        "locId": 100,
+        "locLabel": "Keenspot Bin (100)",
+    },
+    {
+        "name": "Mad Cave Comics",
+        "code": "MAD",
+        "prefixes": ["60196"],
+        "catId": 108,
+        "catLabel": "Mad Cave Comics (MAD)",
+        "locId": 98,
+        "locLabel": "Mad Cave Bin (98)",
+    },
+    {
+        "name": "Marvel Comics",
+        "code": "MAR",
+        "prefixes": ["071486", "59606", "759606"],
+        "catId": 5,
+        "catLabel": "Marvel Comics (MAR)",
+        "locId": 66,
+        "locLabel": "Marvel Bin (66)",
+    },
+    {
+        "name": "Midnight Factory",
+        "code": "MID",
+        "prefixes": ["78200"],
+        "catId": 22,
+        "catLabel": "Midnight Factory",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Oni Press",
+        "code": "ONI",
+        "prefixes": ["64985"],
+        "catId": 107,
+        "catLabel": "Oni Press (ONI)",
+        "locId": 97,
+        "locLabel": "Oni Press Bin (97)",
+    },
+    {
+        "name": "Titan Comics",
+        "code": "TIT",
+        "prefixes": ["65946"],
+        "catId": 22,
+        "catLabel": "Titan Comics (TIT)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Udon",
+        "code": "UDON",
+        "prefixes": ["855"],
+        "catId": 22,
+        "catLabel": "Udon (UDON)",
+        "locId": 82,
+        "locLabel": "Indie / Studio Boxes (82)",
+    },
+    {
+        "name": "Valiant Entertainment",
+        "code": "VAL",
+        "prefixes": [],
+        "catId": 23,
+        "catLabel": "Valiant Entertainment (VAL)",
+        "locId": 80,
+        "locLabel": "Valiant Bin (80)",
+    },
+    {
+        "name": "Vault Comics",
+        "code": "VAU",
+        "prefixes": ["85005"],
+        "catId": 109,
+        "catLabel": "Vault Comics (VAU)",
+        "locId": 99,
+        "locLabel": "Vault Bin (99)",
+    },
+    {
+        "name": "Vertigo Comics",
+        "code": "VER",
+        "prefixes": [],
+        "catId": 26,
+        "catLabel": "Vertigo Comics (VER)",
+        "locId": 84,
+        "locLabel": "Vertigo Storage (84)",
+    },
+    # {"name": "New Publisher", "code": "NEW", "prefixes": ["123"], "catId": 22, "catLabel": "Indie (IND)", "locId": 82, "locLabel": "Indie / Studio Boxes (82)"},
 ]
 
-LOCATIONS_LIST = [
-    {"id": 66, "name": "Marvel Bin (66)"},
-    {"id": 70, "name": "Image Bin (70)"},
-    {"id": 73, "name": "Dark Horse Bin (73)"},
-    {"id": 76, "name": "IDW Bin (76)"},
-    {"id": 80, "name": "Valiant Bin (80)"},
-    {"id": 82, "name": "Indie / Studio Boxes (82)"},
-    {"id": 84, "name": "Vertigo Storage (84)"},
-    {"id": 91, "name": "DC Bin (91)"},
-    {"id": 94, "name": "Dynamite Bin (94)"},
-    {"id": 97, "name": "Oni Press Bin (97)"},
-    {"id": 98, "name": "Mad Cave Bin (98)"},
-    {"id": 99, "name": "Vault Bin (99)"},
-    {"id": 100, "name": "Keenspot Bin (100)"}
-]
+# -----------------------------------------------------------------
+# 2. RUNTIME COMPILATION ENGINE
+# -----------------------------------------------------------------
+# These initialize empty containers and automatically populate them on load.
+PUBLISHER_CODES = {}
+PUBLISHER_UPC_PREFIXES = {}
+PUBLISHER_PART_CATEGORIES = {}
+
+CATEGORIES_LIST = []
+LOCATIONS_LIST = []
+
+# Tracker sets to ensure we don't push duplicate dictionaries into our dropdown list selections
+seen_categories = set()
+seen_locations = set()
+
+for pub in PUBLISHER_REGISTRY:
+    # 1. Map string name directly to standard 3-4 letter short-code
+    PUBLISHER_CODES[pub["name"]] = pub["code"]
+
+    # 2. Map code directly to InvenTree Category Database PK ID
+    PUBLISHER_PART_CATEGORIES[pub["code"]] = pub["catId"]
+
+    # 3. Flatten out the list of prefix strings to map right back to the code string
+    for prefix in pub.get("prefixes", []):
+        PUBLISHER_UPC_PREFIXES[prefix] = pub["code"]
+
+    # 4. Compile dynamic dictionary elements for dropdown menus without duplication
+    if pub["catId"] not in seen_categories:
+        seen_categories.add(pub["catId"])
+        CATEGORIES_LIST.append({"id": pub["catId"], "name": pub["catLabel"]})
+
+    if pub["locId"] not in seen_locations:
+        seen_locations.add(pub["locId"])
+        LOCATIONS_LIST.append({"id": pub["locId"], "name": pub["locLabel"]})
+
+# Sort both dynamic dropdown layouts cleanly by their label names
+CATEGORIES_LIST.sort(key=lambda x: x["name"])
+LOCATIONS_LIST.sort(key=lambda x: x["name"])

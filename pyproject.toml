@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "inventree-comic-scanner"
 description = "Lookup comic floppies via UPC using Metron.cloud"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
     { name = "Just Us Brothers", email = "info@justusbrothers.shop" },
 ]
@@ -28,7 +28,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://inventree.justusbros.shop"
+Homepage = "https://inventree.justusbrothers.shop"
 
 [project.entry-points."inventree_plugins"]
 comic_scanner = "comic_scanner.core:ComicScannerPlugin"

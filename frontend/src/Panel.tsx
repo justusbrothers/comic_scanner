@@ -23,7 +23,6 @@ import {
   IconBarcode,
   IconCheck,
   IconExternalLink,
-  IconSearch,
   IconX
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
@@ -36,8 +35,6 @@ interface ComicData {
   volume: string | null;
   publisher: string;
   pub_code: string;
-  cover_date: string;
-  store_date: string;
   variant: string;
   description: string;
   metron_url: string;
@@ -45,6 +42,7 @@ interface ComicData {
   image_url: string;
   part_link: string;
   category?: number;
+  store_date: string;
   listed_on_whatnot: boolean;
   whatnot_price: string;
 
@@ -60,8 +58,6 @@ interface Variant {
   display_name: string;
   image_url: string;
   description: string;
-  cover_date: string;
-  store_date: string;
   upc: string | null;
   is_scanned_match: boolean;
 }
@@ -75,100 +71,168 @@ interface LookupResponse {
 }
 
 /* -------------------- Publisher Defaults -------------------- */
-const PUBLISHER_CODES: Record<string, string> = {
-  'Abstract Studio': 'ABS',
-  'Action Lab Comics': 'ALC',
-  'Archie Comics': 'ARCH',
-  'Bad Idea Studios': 'BAD',
-  'Boom! Studios': 'BOOM',
-  'Dark Horse Comics': 'DHC',
-  'DC Comics': 'DC',
-  "Devil's Due Comics": 'DD',
-  'IDW Publishing': 'IDW',
-  'Image Comics': 'IMG',
-  'Indie Comics': 'IND',
-  'Iron Age Comics': 'IAC',
-  Keenspot: 'KS',
-  'Mad Cave Comics': 'MAD',
-  'Marvel Comics': 'MAR',
-  'Midnight Factory': 'MID',
-  'Oni Press': 'ONI',
-  'Valiant Entertainment': 'VAL',
-  'Vault Comics': 'VAU',
-  'Vertigo Comics': 'VER'
-};
 
-const PUBLISHER_UPC_PREFIXES: Record<string, string> = {
-  '070989': 'DC',
-  '071486': 'MAR',
-  '59606': 'MAR',
-  '60196': 'MAD',
-  '60283': 'KS',
-  '60554': 'IAC',
-  '64985': 'ONI',
-  '68267': 'DD',
-  '704': 'IMG',
-  '709': 'IMG',
-  '70985': 'IMG',
-  '72513': 'DYN',
-  '759606': 'MAR',
-  '761568': 'DHC',
-  '761941': 'DC',
-  '78200': 'MID',
-  '78430': 'ALC',
-  '827': 'IDW',
-  '85001': 'BAD',
-  '85005': 'VAU',
-  '89317': 'ABS'
-};
+// 1. Define the structural Type interface for safety
+interface PublisherConfig {
+  name: string;
+  code: string;
+  prefixes: string[];
+  catId: number;
+  locId: number | null;
+}
 
-const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {
-  ABS: 22,
-  ALC: 22,
-  ARCH: null,
-  BAD: 22,
-  BOOM: null,
-  DC: 3,
-  DD: 22,
-  DHC: 2,
-  DYN: 105,
-  IAC: 22,
-  IDW: 24,
-  IMG: 4,
-  IND: 22,
-  KS: 110,
-  MAD: 108,
-  MAR: 5,
-  MID: 22,
-  ONI: 107,
-  VAL: 23,
-  VAU: 109,
-  VER: 26
-};
+// 2. The Single Source of Truth Registry
+const PUBLISHER_REGISTRY: PublisherConfig[] = [
+  {
+    name: 'Abstract Studio',
+    code: 'ABS',
+    prefixes: ['89317'],
+    catId: 22,
+    locId: 82
+  },
+  {
+    name: 'Action Lab Comics',
+    code: 'ALC',
+    prefixes: ['78430'],
+    catId: 22,
+    locId: 82
+  },
+  { name: 'Archie Comics', code: 'ARCH', prefixes: [], catId: 22, locId: null },
+  {
+    name: 'Bad Idea Studios',
+    code: 'BAD',
+    prefixes: ['85001'],
+    catId: 22,
+    locId: 82
+  },
+  {
+    name: 'Boom! Studios',
+    code: 'BOOM',
+    prefixes: ['84428'],
+    catId: 22,
+    locId: null
+  },
+  {
+    name: 'Dark Horse Comics',
+    code: 'DHC',
+    prefixes: ['761568'],
+    catId: 2,
+    locId: 73
+  },
+  {
+    name: 'DC Comics',
+    code: 'DC',
+    prefixes: ['070989', '761941'],
+    catId: 3,
+    locId: 91
+  },
+  {
+    name: "Devil's Due Comics",
+    code: 'DD',
+    prefixes: ['68267'],
+    catId: 22,
+    locId: 82
+  },
+  { name: 'DSTLRY', code: 'DST', prefixes: ['614'], catId: 22, locId: 82 },
+  {
+    name: 'Dynamite Entertainment',
+    code: 'DYN',
+    prefixes: ['72513'],
+    catId: 105,
+    locId: 94
+  },
+  {
+    name: 'IDW Publishing',
+    code: 'IDW',
+    prefixes: ['827'],
+    catId: 24,
+    locId: 76
+  },
+  {
+    name: 'Image Comics',
+    code: 'IMG',
+    prefixes: ['704', '709', '70985'],
+    catId: 4,
+    locId: 70
+  },
+  { name: 'Indie Comics', code: 'IND', prefixes: [], catId: 22, locId: 82 },
+  {
+    name: 'Iron Age Comics',
+    code: 'IAC',
+    prefixes: ['60554'],
+    catId: 22,
+    locId: 82
+  },
+  { name: 'Keenspot', code: 'KS', prefixes: ['60283'], catId: 110, locId: 100 },
+  {
+    name: 'Mad Cave Comics',
+    code: 'MAD',
+    prefixes: ['60196'],
+    catId: 108,
+    locId: 98
+  },
+  {
+    name: 'Marvel Comics',
+    code: 'MAR',
+    prefixes: ['071486', '59606', '759606'],
+    catId: 5,
+    locId: 66
+  },
+  {
+    name: 'Midnight Factory',
+    code: 'MID',
+    prefixes: ['78200'],
+    catId: 22,
+    locId: 82
+  },
+  {
+    name: 'Oni Press',
+    code: 'ONI',
+    prefixes: ['64985'],
+    catId: 107,
+    locId: 97
+  },
+  {
+    name: 'Titan Comics',
+    code: 'TIT',
+    prefixes: ['65946'],
+    catId: 22,
+    locId: 82
+  },
+  { name: 'Udon', code: 'UDON', prefixes: ['855'], catId: 22, locId: 82 },
+  {
+    name: 'Valiant Entertainment',
+    code: 'VAL',
+    prefixes: [],
+    catId: 23,
+    locId: 80
+  },
+  {
+    name: 'Vault Comics',
+    code: 'VAU',
+    prefixes: ['85005'],
+    catId: 109,
+    locId: 99
+  },
+  { name: 'Vertigo Comics', code: 'VER', prefixes: [], catId: 26, locId: 84 }
+];
 
-const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {
-  ABS: 82,
-  ALC: 82,
-  ARCH: null,
-  BAD: 82,
-  BOOM: null,
-  DC: 91,
-  DD: 82,
-  DHC: 73,
-  DYN: 94,
-  IAC: 82,
-  IDW: 76,
-  IMG: 70,
-  IND: 82,
-  KS: 100,
-  MAD: 98,
-  MAR: 66,
-  MID: 82,
-  ONI: 97,
-  VAL: 80,
-  VAU: 99,
-  VER: 84
-};
+// 3. Initialize typed export objects
+const PUBLISHER_CODES: Record<string, string> = {};
+const PUBLISHER_UPC_PREFIXES: Record<string, string> = {};
+const PUBLISHER_PART_CATEGORIES: Record<string, number | null> = {};
+const PUBLISHER_STOCK_LOCATIONS: Record<string, number | null> = {};
+
+// 4. Runtime Unpacking Block
+PUBLISHER_REGISTRY.forEach((pub) => {
+  PUBLISHER_CODES[pub.name] = pub.code;
+  PUBLISHER_PART_CATEGORIES[pub.code] = pub.catId;
+  PUBLISHER_STOCK_LOCATIONS[pub.code] = pub.locId;
+
+  pub.prefixes.forEach((prefix) => {
+    PUBLISHER_UPC_PREFIXES[prefix] = pub.code;
+  });
+});
 
 const COMIC_CONDITIONS = [
   { value: 'Near Mint', label: 'Near Mint (NM)' },
@@ -198,7 +262,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
   const [barcodeInput, setBarcodeInput] = useState('');
   const [metronIdInput, setMetronIdInput] = useState('');
-  const [queryInput, setQueryInput] = useState('');
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -214,8 +277,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const [editedData, setEditedData] = useState<Partial<ComicData>>({});
   const [editedUPC, setEditedUPC] = useState<string>('');
 
+  // Issue info fields
+  const [storeDate, setStoreDate] = useState('');
+
   // WhatNot fields
-  const [listedOnWhatnot, setListedOnWhatnot] = useState(false);
+  const [listedOnWhatnot, setListedOnWhatnot] = useState(true);
   const [whatnotAuctionPrice, setWhatnotAuctionPrice] = useState('');
 
   // New Condition field
@@ -231,6 +297,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const [includeDescription, setIncludeDescription] = useState(true);
   const [includeImage, setIncludeImage] = useState(true);
   const [includeUPC, setIncludeUPC] = useState(true);
+  const [includeStoreDate, setIncludeStoreDate] = useState(true);
 
   // Stock
   const [createStock, setCreateStock] = useState(true);
@@ -263,12 +330,11 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
   const handleLookupClick = async () => {
     const cleanedBarcode = cleanBarcode(barcodeInput.trim());
     const metronId = metronIdInput.trim();
-    const searchQuery = queryInput.trim();
 
-    if (!cleanedBarcode && !metronId && !searchQuery) {
+    if (!cleanedBarcode && !metronId) {
       notifications.show({
         title: 'Input required',
-        message: 'Enter a UPC barcode, Metron issue ID, or search query',
+        message: 'Enter a UPC barcode or Metron issue ID',
         color: 'yellow'
       });
       return;
@@ -282,7 +348,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     setCreatedOrUpdatedPart(null);
     setEditedData({});
     setEditedUPC('');
-    setListedOnWhatnot(false);
+    setStoreDate('');
+    setListedOnWhatnot(true);
     setWhatnotAuctionPrice('');
     setSelectedCondition('Near Mint');
     setSelectedCategory(null);
@@ -294,8 +361,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         payload.metron_id = metronId;
       } else if (cleanedBarcode) {
         payload.barcode = cleanedBarcode;
-      } else {
-        payload.query = searchQuery;
       }
 
       const response = await context.api.post<LookupResponse>(
@@ -304,13 +369,14 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       );
 
       const data = response.data;
+      const comic = data.comic_data;
 
       if (!data?.success || !data?.comic_data || !data?.variants) {
         throw new Error(data?.message || 'Invalid response');
       }
 
       setLookupResult({
-        defaultComic: data.comic_data,
+        defaultComic: comic,
         variants: data.variants,
         scannedBarcode: data.scanned_barcode || ''
       });
@@ -319,28 +385,27 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       const initialVariant = matched || data.variants[0] || null;
       setSelectedVariant(initialVariant);
 
-      const baseIpn = data.comic_data.ipn_proposed;
+      const baseIpn = comic.ipn_proposed;
       const initialIpn = initialVariant
         ? getVariantIpn(baseIpn, initialVariant.variant)
         : baseIpn;
 
       setEditedData({
-        title: initialVariant?.display_name ?? data.comic_data.title,
-        description: initialVariant?.description ?? data.comic_data.description,
-        image_url: initialVariant?.image_url ?? data.comic_data.image_url,
-        cover_date: initialVariant?.cover_date ?? data.comic_data.cover_date,
-        store_date: initialVariant?.store_date ?? data.comic_data.store_date,
+        title: initialVariant?.display_name ?? comic.title,
+        description: initialVariant?.description ?? comic.description,
+        image_url: initialVariant?.image_url ?? comic.image_url,
         ipn_proposed: initialIpn
       });
 
       setEditedUPC(data.scanned_barcode || '');
 
+      setStoreDate(comic.store_date || '');
+
       // ====================== PRICE AUTO-FILL ======================
-      const comic = data.comic_data;
       const hasEstimatedPrice =
         comic.estimated_price && comic.estimated_price > 0;
 
-      setListedOnWhatnot(hasEstimatedPrice || comic.listed_on_whatnot || false);
+      setListedOnWhatnot(hasEstimatedPrice || comic.listed_on_whatnot || true);
       setWhatnotAuctionPrice(
         hasEstimatedPrice
           ? comic.estimated_price!.toFixed(2)
@@ -358,7 +423,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       }
       // ============================================================
 
-      const defaultCat = data.comic_data.category || 1;
+      const defaultCat = comic.category || 1;
       setSelectedCategory(defaultCat);
 
       setIncludeTitle(true);
@@ -366,18 +431,19 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       setIncludeDescription(true);
       setIncludeImage(true);
       setIncludeUPC(!!data.scanned_barcode);
+      setIncludeStoreDate(true);
       setCreateStock(true);
       setInitialQuantity(1);
 
       // Check if base part already exists
       const partRes = await context.api.get('/api/part/', {
-        params: { search: data.comic_data.ipn_proposed }
+        params: { search: comic.ipn_proposed }
       });
       const parts = Array.isArray(partRes.data)
         ? partRes.data
         : partRes.data.results || [];
       const exactMatch = parts.find(
-        (p: any) => p.IPN?.trim() === data.comic_data.ipn_proposed.trim()
+        (p: any) => p.IPN?.trim() === comic.ipn_proposed.trim()
       );
       setExistingPartPk(exactMatch?.pk ?? null);
 
@@ -421,8 +487,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       volume: '',
       publisher: '',
       pub_code: '',
-      cover_date: '',
-      store_date: '',
       variant: '',
       description: '',
       metron_url: '',
@@ -430,8 +494,9 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       image_url: '',
       part_link: '',
       category: 1,
-      listed_on_whatnot: false,
       whatnot_price: '',
+      listed_on_whatnot: false,
+      store_date: '',
       estimated_price: null,
       price_source: '',
       price_note: ''
@@ -443,8 +508,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       display_name: '',
       image_url: '',
       description: '',
-      cover_date: '',
-      store_date: '',
       upc: '',
       is_scanned_match: false
     };
@@ -461,14 +524,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       title: '',
       description: '',
       image_url: '',
-      cover_date: '',
-      store_date: '',
       ipn_proposed: ''
     });
 
     setEditedUPC('');
     setSelectedCategory(1);
-    setListedOnWhatnot(false);
+    setListedOnWhatnot(true);
     setWhatnotAuctionPrice('');
 
     setIncludeTitle(true);
@@ -476,6 +537,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
     setIncludeDescription(true);
     setIncludeImage(true);
     setIncludeUPC(true);
+    setIncludeStoreDate(true);
   };
 
   useEffect(() => {
@@ -490,8 +552,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         title: selectedVariant.display_name,
         description: selectedVariant.description,
         image_url: selectedVariant.image_url,
-        cover_date: selectedVariant.cover_date,
-        store_date: selectedVariant.store_date,
         ipn_proposed: variantIpn
       }));
       if (selectedVariant.upc) {
@@ -635,8 +695,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
       variant: selectedVariant.variant,
       metron_id: selectedVariant.metron_id,
       metron_url: `https://metron.cloud/issue/${selectedVariant.metron_id}/`,
-      cover_date: editedData.cover_date ?? selectedVariant.cover_date,
-      store_date: editedData.store_date ?? selectedVariant.store_date,
       part_link: lookupResult.defaultComic.part_link
     };
 
@@ -757,7 +815,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
         }
       }
 
-      // Save WhatNot and Condition parameters
+      // Save Part parameters
       if (partPk) {
         await ensureParameter(
           partPk,
@@ -766,6 +824,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           true,
           11
         );
+
         const price = whatnotAuctionPrice.trim();
         if (price) {
           await ensureParameter(
@@ -784,6 +843,8 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           false,
           16
         );
+
+        await ensureParameter(partPk, 'In Stock Date', storeDate, false, 68);
 
         setCreatedOrUpdatedPart({
           pk: partPk,
@@ -850,8 +911,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           metron_url: selectedVariant.metron_id
             ? `https://metron.cloud/issue/${selectedVariant.metron_id}/`
             : '',
-          cover_date: editedData.cover_date ?? selectedVariant.cover_date,
-          store_date: editedData.store_date ?? selectedVariant.store_date,
           part_link: lookupResult.defaultComic.part_link || ''
         }
       : (lookupResult?.defaultComic ?? null);
@@ -879,22 +938,12 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
           leftSection={<IconExternalLink size={16} />}
         />
 
-        <TextInput
-          placeholder='Search by title, series, issue # (e.g. Batman 123)'
-          value={queryInput}
-          onChange={(e) => setQueryInput(e.currentTarget.value)}
-          leftSection={<IconSearch />}
-        />
-
         <Group grow>
           <Button
             onClick={handleLookupClick}
             loading={loading}
             disabled={
-              loading ||
-              (!barcodeInput.trim() &&
-                !metronIdInput.trim() &&
-                !queryInput.trim())
+              loading || (!barcodeInput.trim() && !metronIdInput.trim())
             }
           >
             Lookup
@@ -1213,6 +1262,36 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
 
                   <Table.Tr>
                     <Table.Td>
+                      <Switch
+                        checked={includeStoreDate}
+                        onChange={(e) =>
+                          setIncludeStoreDate(e.currentTarget.checked)
+                        }
+                      />
+                    </Table.Td>
+                    <Table.Td>Store Date</Table.Td>
+                    <Table.Td>
+                      <TextInput
+                        value={storeDate}
+                        onChange={(e) => setStoreDate(e.currentTarget.value)}
+                        placeholder={
+                          lookupResult?.defaultComic?.store_date || 'YYYY-MM-DD'
+                        }
+                        disabled={!includeStoreDate}
+                        error={
+                          includeStoreDate &&
+                          storeDate &&
+                          !/^\d{4}-\d{2}-\d{2}$/.test(storeDate)
+                            ? 'Invalid date format (YYYY-MM-DD)'
+                            : null
+                        }
+                        type='text'
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+
+                  <Table.Tr>
+                    <Table.Td>
                       <Switch checked={true} disabled />
                     </Table.Td>
                     <Table.Td>Part Category</Table.Td>
@@ -1388,7 +1467,6 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 setSelectedVariant(null);
                 setBarcodeInput('');
                 setMetronIdInput('');
-                setQueryInput('');
                 setExistingPartPk(null);
                 setInitialQuantity(1);
                 setCreateStock(true);
@@ -1400,7 +1478,7 @@ function ComicScannerPanel({ context }: { context: InvenTreePluginContext }) {
                 setIncludeUPC(true);
                 setEditedData({});
                 setEditedUPC('');
-                setListedOnWhatnot(false);
+                setListedOnWhatnot(true);
                 setWhatnotAuctionPrice('');
                 setSelectedCondition('Near Mint');
                 setSelectedCategory(null);

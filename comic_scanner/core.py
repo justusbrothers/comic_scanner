@@ -15,18 +15,12 @@ class ComicScannerPlugin(UrlsMixin, UserInterfaceMixin, InvenTreePlugin):
     SLUG = "comic_scanner"
     VERSION = PLUGIN_VERSION
 
-    # Optional Metadata
     DESCRIPTION = "Lookup comic floppies via UPC using Metron.cloud"
     AUTHOR = "Just Us Brothers"
     WEBSITE = "https://justusbrothers.shop"
     LICENSE = "MIT"
 
     def setup_urls(self):
-        """
-        Register the URLs for the plugin.
-        Note: The .views import is kept inside here to avoid
-        circular import issues during startup.
-        """
         from .views import ComicLookup as ComicLookupView
 
         return [path("comic-lookup/", ComicLookupView.as_view(), name="comic-lookup")]
