@@ -31,7 +31,7 @@ classifiers = [
 Homepage = "https://inventree.justusbrothers.shop"
 
 [project.entry-points."inventree_plugins"]
-comic_scanner = "comic_scanner.core:Panel"
+comic_scanner = "comic_scanner.core:ComicScannerPlugin"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -39,7 +39,7 @@ include = ["comic_scanner", "comic_scanner.*"]
 
 [tool.setuptools.dynamic] 
 # Points to the PLUGIN_VERSION variable inside your inner core.py
-version = { attr = "comic_scanner.comic_scanner.core.PLUGIN_VERSION" }
+version = { attr = "comic_scanner.core.PLUGIN_VERSION" }
 
 [tool.ruff]
 exclude = [

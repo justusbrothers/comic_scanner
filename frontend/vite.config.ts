@@ -1,55 +1,41 @@
+// frontend/vite.config.ts
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { viteExternalsPlugin } from 'vite-plugin-externals';
 
-/**
- * The following libraries are externalized to avoid bundling them with the plugin.
- * These libraries are provided by the InvenTree core application.
- */
-export const externalLibs: Record<string, string> = {
+// Map external dependencies provided globally by InvenTree at runtime
+export const externalLibs = {
   react: 'React',
   'react-dom': 'ReactDOM',
-  ReactDom: 'ReactDOM',
+  'react-dom/client': 'ReactDOM',
   'react/jsx-runtime': 'React',
   '@lingui/core': 'LinguiCore',
   '@lingui/react': 'LinguiReact',
   '@mantine/core': 'MantineCore',
-  '@mantine/notifications': 'MantineNotifications'
+  '@mantine/hooks': 'MantineHooks',
+  '@mantine/notifications': 'MantineNotifications',
+  '@inventreedb/ui': 'InvenTreeUI',
 };
 
-// Just the keys of the externalLibs object
-const externalKeys = Object.keys(externalLibs);
-
-/**
- * Vite config to build the frontend plugin as an exported module.
- * Distributed in the 'static' directory of the plugin.
- */
 export default defineConfig({
   plugins: [
-    react({
-      jsxRuntime: 'classic'
-    }),
-    viteExternalsPlugin(externalLibs)
+    react(),
+    // viteExternalsPlugin handles replacing imports with global window objects
+    viteExternalsPlugin(externalLibs),
   ],
-  // FIX 2: Removed `esbuild: { jsx: 'preserve' }` so JSX compiles to standard JS
   build: {
     target: 'esnext',
     cssCodeSplit: false,
-    manifest: true,
     sourcemap: true,
-    rollupOptions: {
-      preserveEntrySignatures: 'exports-only',
-      input: ['./src/Panel.tsx'],
-      output: {
-        dir: '../comic_scanner/static',
-        entryFileNames: '[name].js',
-        assetFileNames: 'assets/[name].[ext]',
-        globals: externalLibs
-      },
-      external: externalKeys
-    }
+    emptyOutDir: true,
+    lib: {
+      entry: './src/Panel.tsx', // Your plugin entry point
+      formats: ['es'],
+      fileName: () => 'Panel.js',
+    },
+    outDir: '../comic_scanner/static',
   },
   optimizeDeps: {
-    exclude: externalKeys
-  }
+    exclude: Object.keys(externalLibs),
+  },
 });

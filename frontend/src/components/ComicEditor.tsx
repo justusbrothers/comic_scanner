@@ -23,7 +23,10 @@ interface ComicEditorProps {
   selectedCondition: string;
   loading: boolean;
   existingPartPk: number | null;
-  onEditChange: (field: keyof ComicData, val: any) => void;
+  onEditChange: <K extends keyof ComicData>(
+    field: K,
+    val: ComicData[K]
+  ) => void;
   onUpcChange: (val: string) => void;
   onCreateStockChange: (val: boolean) => void;
   onQuantityChange: (val: number) => void;

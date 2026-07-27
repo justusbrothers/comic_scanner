@@ -83,7 +83,7 @@ class ComicLookup(APIView):
             )
 
         barcode = "".join(c for c in str(barcode) if c.isdigit())
-        logger.info("ComicScanner: Processing barcode %s", barcode)
+        # logger.info("ComicScanner: Processing barcode %s", barcode)
 
         if len(barcode) < 12:
             return Response(
@@ -108,7 +108,7 @@ class ComicLookup(APIView):
         issue_id = None
 
         if cached_data:
-            logger.info("ComicScanner: Cache HIT for base UPC %s", standard_barcode)
+            # logger.info("ComicScanner: Cache HIT for base UPC %s", standard_barcode)
             full_anchor = cached_data.get("full_anchor")
             all_issue_variants = cached_data.get("variants", [])
             issue_id = full_anchor.get("id") if full_anchor else None

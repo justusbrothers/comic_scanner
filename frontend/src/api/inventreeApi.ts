@@ -1,5 +1,12 @@
 import type { InvenTreePluginContext } from '@inventreedb/ui';
 
+interface ParameterTemplate {
+  pk: number;
+  name: string;
+  description?: string;
+  data_type?: string;
+}
+
 export async function ensureTemplate(
   context: InvenTreePluginContext,
   name: string,
@@ -9,9 +16,9 @@ export async function ensureTemplate(
     const res = await context.api.get('/api/parameter/template/', {
       params: { search: name }
     });
-    const results = res.data?.results || res.data || [];
+    const results: ParameterTemplate[] = res.data?.results || res.data || [];
     const existing = results.find(
-      (t: any) => t.name.toLowerCase() === name.toLowerCase()
+      (t) => t.name.toLowerCase() === name.toLowerCase()
     );
 
     if (existing) return existing.pk;
@@ -32,7 +39,7 @@ export async function ensureParameter(
   context: InvenTreePluginContext,
   partPk: number,
   templateName: string,
-  dataValue: any,
+  dataValue: string | number | boolean,
   isBool = false
 ): Promise<void> {
   try {

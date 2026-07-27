@@ -3,6 +3,7 @@ import { Alert, Group, Loader, Stack, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck } from '@tabler/icons-react';
 import { useState } from 'react';
+
 import { ensureParameter } from './api/inventreeApi';
 import { ComicEditor } from './components/ComicEditor';
 import { ScannerInput } from './components/ScannerInput';
@@ -16,6 +17,7 @@ import {
 import { getVariantIpn, truncateDescription } from './utils/stringUtils';
 
 export function Panel({ context }: { context: InvenTreePluginContext }) {
+  // 1. Hooks MUST be declared at the top level
   const [barcodeInput, setBarcodeInput] = useState('');
   const [metronIdInput, setMetronIdInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,13 +27,18 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
   const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
   const [editedData, setEditedData] = useState<Partial<ComicData>>({});
   const [editedUPC, setEditedUPC] = useState('');
-  const [existingPartPk, _setExistingPartPk] = useState<number | null>(null);
+  const [existingPartPk] = useState<number | null>(null);
 
   const [createStock, setCreateStock] = useState(true);
   const [initialQuantity, setInitialQuantity] = useState(1);
   const [listedOnWhatnot, setListedOnWhatnot] = useState(false);
   const [whatnotAuctionPrice, setWhatnotAuctionPrice] = useState('');
   const [selectedCondition, setSelectedCondition] = useState('Near Mint');
+
+  // Guard condition after hook initialization
+  if (!context) {
+    return <Alert color='red'>Plugin context unavailable.</Alert>;
+  }
 
   const handleLookupClick = async () => {
     setLoading(true);
@@ -48,8 +55,15 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
         setSelectedVariant(match);
         setEditedUPC(match.upc || barcodeInput);
       }
-    } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Lookup failed');
+    } catch (err: unknown) {
+      // Type assertion or checking for Axios error structure
+      const errorObj = err as {
+        response?: { data?: { message?: string } };
+        message?: string;
+      };
+      setError(
+        errorObj.response?.data?.message || errorObj.message || 'Lookup failed'
+      );
     } finally {
       setLoading(false);
     }
@@ -74,10 +88,13 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
 
     let partPk: number | null =
       mode === 'update-existing' ? existingPartPk : null;
-    const finalIpn = getVariantIpn(
-      lookupResult.defaultComic.ipn_proposed,
-      selectedVariant.variant
-    );
+    const finalIpn =
+      mode === 'create-variant'
+        ? getVariantIpn(
+            lookupResult.defaultComic.ipn_proposed,
+            selectedVariant.variant
+          )
+        : lookupResult.defaultComic.ipn_proposed;
 
     try {
       const pubCode = determinePublisherCode(
@@ -126,9 +143,15 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
         color: 'green',
         icon: <IconCheck />
       });
-    } catch (err: any) {
-      const apiErr = err?.response?.data || err.message;
-      setError(typeof apiErr === 'object' ? JSON.stringify(apiErr) : apiErr);
+    } catch (err: unknown) {
+      const errorObj = err as {
+        response?: { data?: unknown };
+        message?: string;
+      };
+      const apiErr = errorObj?.response?.data || errorObj.message;
+      setError(
+        typeof apiErr === 'object' ? JSON.stringify(apiErr) : String(apiErr)
+      );
     } finally {
       setLoading(false);
     }
@@ -189,3 +212,9 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
     </Stack>
   );
 }
+
+export function renderComicScannerPanel(context: InvenTreePluginContext) {
+  return <Panel context={context} />;
+}
+
+export default Panel;
