@@ -3,7 +3,6 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { viteExternalsPlugin } from 'vite-plugin-externals';
 
-// Map external dependencies provided globally by InvenTree at runtime
 export const externalLibs = {
   react: 'React',
   'react-dom': 'ReactDOM',
@@ -19,8 +18,7 @@ export const externalLibs = {
 
 export default defineConfig({
   plugins: [
-    react(),
-    // viteExternalsPlugin handles replacing imports with global window objects
+    react({ jsxRuntime: 'classic' }),
     viteExternalsPlugin(externalLibs),
   ],
   build: {
@@ -29,7 +27,7 @@ export default defineConfig({
     sourcemap: true,
     emptyOutDir: true,
     lib: {
-      entry: './src/Panel.tsx', // Your plugin entry point
+      entry: './src/Panel.tsx',
       formats: ['es'],
       fileName: () => 'Panel.js',
     },

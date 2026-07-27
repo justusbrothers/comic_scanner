@@ -16,7 +16,12 @@ import {
 } from './utils/publisherHelpers';
 import { getVariantIpn, truncateDescription } from './utils/stringUtils';
 
-export function Panel({ context }: { context: InvenTreePluginContext }) {
+// Internal React Component
+export function ComicScannerPanel({
+  context
+}: {
+  context: InvenTreePluginContext;
+}) {
   // 1. Hooks MUST be declared at the top level
   const [barcodeInput, setBarcodeInput] = useState('');
   const [metronIdInput, setMetronIdInput] = useState('');
@@ -56,7 +61,6 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
         setEditedUPC(match.upc || barcodeInput);
       }
     } catch (err: unknown) {
-      // Type assertion or checking for Axios error structure
       const errorObj = err as {
         response?: { data?: { message?: string } };
         message?: string;
@@ -213,8 +217,10 @@ export function Panel({ context }: { context: InvenTreePluginContext }) {
   );
 }
 
-export function renderComicScannerPanel(context: InvenTreePluginContext) {
-  return <Panel context={context} />;
+// InvenTree Entry Points
+// Returns JSX elements so React mounts <ComicScannerPanel /> cleanly
+export function Panel(context: InvenTreePluginContext) {
+  return <ComicScannerPanel context={context} />;
 }
 
 export default Panel;
