@@ -75,17 +75,18 @@ class ComicLookup(APIView):
 
     def post(self, request, *args, **kwargs):
         barcode = request.data.get("barcode", "")
+        metron_id = request.data.get("metron_id", "")
 
-        if not barcode:
+        if not barcode and not metron_id:
             return Response(
-                {"success": False, "message": "Provide a valid barcode entry."},
+                {"success": False, "message": "Provide a valid barcode or Metron ID."},
                 status=400,
             )
 
+        # Standardize Barcode if provided
         barcode = "".join(c for c in str(barcode) if c.isdigit())
-        # logger.info("ComicScanner: Processing barcode %s", barcode)
 
-        if len(barcode) < 12:
+        if barcode and len(barcode) < 12 and not metron_id:
             return Response(
                 {"success": False, "message": "Invalid barcode length"}, status=400
             )
@@ -93,13 +94,14 @@ class ComicLookup(APIView):
         original_barcode = barcode
         standard_barcode = original_barcode
 
-        # Standardize 17+ digit UPCs to end in Cover A ("11") for base issue lookups
         if len(original_barcode) >= 17:
             standard_barcode = original_barcode[:-2] + "11"
 
         target_upc = standard_barcode if standard_barcode else original_barcode
 
-        # --- 1. CHECK CACHE FOR BASE ISSUE & VARIANTS DATASET (2-MINUTE TTL) ---
+        if metron_id and not barcode:
+            pass
+
         cache_key = f"base_issue_data_{standard_barcode}"
         cached_data = cache.get(cache_key)
 

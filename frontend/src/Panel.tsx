@@ -16,13 +16,11 @@ import {
 } from './utils/publisherHelpers';
 import { getVariantIpn, truncateDescription } from './utils/stringUtils';
 
-// Internal React Component
 export function ComicScannerPanel({
   context
 }: {
   context: InvenTreePluginContext;
 }) {
-  // 1. Hooks MUST be declared at the top level
   const [barcodeInput, setBarcodeInput] = useState('');
   const [metronIdInput, setMetronIdInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,24 +38,33 @@ export function ComicScannerPanel({
   const [whatnotAuctionPrice, setWhatnotAuctionPrice] = useState('');
   const [selectedCondition, setSelectedCondition] = useState('Near Mint');
 
-  // Guard condition after hook initialization
   if (!context) {
     return <Alert color='red'>Plugin context unavailable.</Alert>;
   }
 
   const handleLookupClick = async () => {
     setLoading(true);
+
     setError(null);
+
     try {
-      const res = await context.api.get('/api/plugin/comic-scanner/lookup/', {
-        params: { barcode: barcodeInput, metron_id: metronIdInput }
-      });
+      const res = await context.api.post(
+        '/plugin/comic_scanner/comic-lookup/',
+        {
+          barcode: barcodeInput,
+          metron_id: metronIdInput
+        }
+      );
+
       setLookupResult(res.data);
+
       if (res.data.variants?.length > 0) {
         const match =
           res.data.variants.find((v: Variant) => v.is_scanned_match) ||
           res.data.variants[0];
+
         setSelectedVariant(match);
+
         setEditedUPC(match.upc || barcodeInput);
       }
     } catch (err: unknown) {
@@ -65,6 +72,7 @@ export function ComicScannerPanel({
         response?: { data?: { message?: string } };
         message?: string;
       };
+
       setError(
         errorObj.response?.data?.message || errorObj.message || 'Lookup failed'
       );
@@ -79,8 +87,16 @@ export function ComicScannerPanel({
     setLoading(true);
     setError(null);
 
+    // Access comic_data instead of defaultComic
+    const comicBase = lookupResult.comic_data;
+    if (!comicBase) {
+      setError('Comic data is missing from the lookup result.');
+      setLoading(false);
+      return;
+    }
+
     const active = {
-      ...lookupResult.defaultComic,
+      ...comicBase,
       title: editedData.title ?? selectedVariant.display_name,
       description: truncateDescription(
         editedData.description ?? selectedVariant.description
@@ -94,11 +110,8 @@ export function ComicScannerPanel({
       mode === 'update-existing' ? existingPartPk : null;
     const finalIpn =
       mode === 'create-variant'
-        ? getVariantIpn(
-            lookupResult.defaultComic.ipn_proposed,
-            selectedVariant.variant
-          )
-        : lookupResult.defaultComic.ipn_proposed;
+        ? getVariantIpn(comicBase.ipn_proposed, selectedVariant.variant)
+        : comicBase.ipn_proposed;
 
     try {
       const pubCode = determinePublisherCode(
@@ -217,8 +230,6 @@ export function ComicScannerPanel({
   );
 }
 
-// InvenTree Entry Points
-// Returns JSX elements so React mounts <ComicScannerPanel /> cleanly
 export function Panel(context: InvenTreePluginContext) {
   return <ComicScannerPanel context={context} />;
 }

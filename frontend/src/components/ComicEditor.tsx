@@ -64,27 +64,32 @@ export function ComicEditor({
       {selectedVariant.image_url && (
         <Image src={selectedVariant.image_url} h={200} fit='contain' />
       )}
+
       <TextInput
         label='Title / Name'
         value={editedData.title ?? selectedVariant.display_name}
         onChange={(e) => onEditChange('title', e.currentTarget.value)}
       />
+
       <TextInput
         label='UPC Barcode'
         value={editedUPC}
         onChange={(e) => onUpcChange(e.currentTarget.value)}
       />
+
       <Textarea
         label='Description'
         rows={4}
         value={editedData.description ?? selectedVariant.description}
         onChange={(e) => onEditChange('description', e.currentTarget.value)}
       />
+
       <Switch
         label='Add Initial Stock'
         checked={createStock}
         onChange={(e) => onCreateStockChange(e.currentTarget.checked)}
       />
+
       {createStock && (
         <NumberInput
           label='Quantity'
@@ -93,11 +98,13 @@ export function ComicEditor({
           min={1}
         />
       )}
+
       <Switch
         label='Listed on WhatNot'
         checked={listedOnWhatnot}
         onChange={(e) => onWhatnotChange(e.currentTarget.checked)}
       />
+
       {listedOnWhatnot && (
         <TextInput
           label='WhatNot Auction Price'
@@ -105,6 +112,7 @@ export function ComicEditor({
           onChange={(e) => onWhatnotPriceChange(e.currentTarget.value)}
         />
       )}
+
       <Select
         label='Condition'
         data={[
@@ -119,12 +127,14 @@ export function ComicEditor({
         value={selectedCondition}
         onChange={(val) => onConditionChange(val || 'Near Mint')}
       />
+
       <Group grow mt='md'>
         {existingPartPk && (
           <Button color='orange' loading={loading} onClick={onUpdateExisting}>
             Update Existing Part (#{existingPartPk})
           </Button>
         )}
+
         <Button color='green' loading={loading} onClick={onCreateNewVariant}>
           Create New Part
         </Button>
