@@ -1,11 +1,4 @@
-export function truncateDescription(
-  desc: string,
-  maxLen: number = 250
-): string {
-  if (!desc) return '';
-  if (desc.length <= maxLen) return desc;
-  return `${desc.substring(0, maxLen).trim()}...`;
-}
+// comic_scanner/frontend/src/utils/stringUtils.ts
 
 /**
  * Formats variant IPNs into clean codes (e.g. CB_DC_100BULLETSTHEU-002B)
@@ -26,4 +19,25 @@ export function getVariantIpn(baseIpn: string, variantRaw: string): string {
 
   // 3. Append clean letter/suffix directly to base IPN (no extra dash)
   return `${baseIpn}${cleanVariant}`;
+}
+
+/**
+ * Truncates text used for comic description
+ */
+export function truncateDescription(
+  desc: string,
+  maxLen: number = 250
+): string {
+  // If no `string`, return `empty string`
+  if (!desc) {
+    return '';
+  }
+
+  // If `string is less than 250`, return `whole string`
+  if (desc.length <= maxLen) {
+    return desc;
+  }
+
+  // Trim string to `maxLen` chars
+  return `${desc.substring(0, maxLen).trim()}...`;
 }

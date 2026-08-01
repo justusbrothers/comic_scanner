@@ -2,7 +2,7 @@ import type { InvenTreePluginContext } from '@inventreedb/ui';
 import { Alert, Group, Loader, Stack, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ensureParameter } from './api/inventreeApi';
 import { ComicEditor } from './components/ComicEditor';
@@ -14,7 +14,7 @@ import {
   determinePublisherCode,
   determineStockLocation
 } from './utils/publisherHelpers';
-import { getVariantIpn, truncateDescription } from './utils/stringUtils';
+import { truncateDescription } from './utils/stringUtils';
 
 export function ComicScannerPanel({
   context
@@ -34,9 +34,55 @@ export function ComicScannerPanel({
 
   const [createStock, setCreateStock] = useState(true);
   const [initialQuantity, setInitialQuantity] = useState(1);
-  const [listedOnWhatnot, setListedOnWhatnot] = useState(false);
+  const [listedOnWhatnot, setListedOnWhatnot] = useState(true);
   const [whatnotAuctionPrice, setWhatnotAuctionPrice] = useState('');
   const [selectedCondition, setSelectedCondition] = useState('Near Mint');
+  const [includeStoreDate, setIncludeStoreDate] = useState<boolean>(true);
+  const [storeDate, setStoreDate] = useState<string>('');
+
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+  const [stockLocation, setStockLocation] = useState<number | null>(null);
+
+  // Auto-fill logic when active comic or variant changes
+  useEffect(() => {
+    const active = selectedVariant || lookupResult?.defaultComic;
+    if (!active) return;
+
+    const publisher = active.publisher || '';
+    const title = active.title || active.display_name || '';
+
+    // Auto-determine Category if not set
+    if (!selectedCategory) {
+      const categoryId = determineCategory(publisher, title);
+      if (categoryId) setSelectedCategory(categoryId);
+    }
+
+    // Auto-determine Stock Location if not set
+    if (!stockLocation) {
+      const locationId = determineStockLocation(publisher);
+      if (locationId) setStockLocation(locationId);
+    }
+
+    // Auto-generate IPN if not customized
+    if (!editedData.ipn_proposed) {
+      const pubCode = determinePublisherCode(publisher) || 'CMC';
+      const numMatch = String(active.issue_number || '1').match(/\d+/);
+      const issueStr = numMatch ? numMatch[0].padStart(3, '0') : '001';
+      const variantCode = active.variant
+        ? `-${active.variant
+            .replace(/[^a-zA-Z0-9]/g, '')
+            .slice(0, 2)
+            .toUpperCase()}`
+        : '';
+
+      const generatedIpn = `${pubCode}-${issueStr}${variantCode}`;
+
+      setEditedData((prev) => ({
+        ...prev,
+        ipn_proposed: generatedIpn
+      }));
+    }
+  }, [selectedVariant, lookupResult]);
 
   if (!context) {
     return <Alert color='red'>Plugin context unavailable.</Alert>;
@@ -44,7 +90,6 @@ export function ComicScannerPanel({
 
   const handleLookupClick = async () => {
     setLoading(true);
-
     setError(null);
 
     try {
@@ -56,119 +101,217 @@ export function ComicScannerPanel({
         }
       );
 
-      setLookupResult(res.data);
+      const data = res.data;
+      setLookupResult(data);
 
-      if (res.data.variants?.length > 0) {
+      if (data.comic_data) {
+        setListedOnWhatnot(data.comic_data.listed_on_whatnot ?? true);
+        if (data.comic_data.whatnot_price) {
+          setWhatnotAuctionPrice(String(data.comic_data.whatnot_price));
+        }
+      }
+
+      if (data.variants?.length > 0) {
         const match =
-          res.data.variants.find((v: Variant) => v.is_scanned_match) ||
-          res.data.variants[0];
+          data.variants.find((v: Variant) => v.is_scanned_match) ||
+          data.variants[0];
 
         setSelectedVariant(match);
-
         setEditedUPC(match.upc || barcodeInput);
+        // Pre-fill image_url from the selected variant/lookup
+        setEditedData((prev) => ({
+          ...prev,
+          image_url: match.image_url || ''
+        }));
       }
-    } catch (err: unknown) {
-      const errorObj = err as {
-        response?: { data?: { message?: string } };
-        message?: string;
-      };
-
-      setError(
-        errorObj.response?.data?.message || errorObj.message || 'Lookup failed'
-      );
+    } catch (_err: unknown) {
+      // ... error handling
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSavePart = async (mode: 'update-existing' | 'create-variant') => {
-    if (!lookupResult || !selectedVariant) return;
+  const handleManualEntry = () => {
+    setError(null);
 
+    const manualComic: ComicData = {
+      title: 'New Comic',
+      publisher: '',
+      issue_number: '1',
+      description: '',
+      image_url: '',
+      display_name: 'New Comic #1'
+    };
+
+    const manualVariant: Variant = {
+      ...manualComic,
+      variant: 'Cover A',
+      upc: barcodeInput.trim(),
+      is_scanned_match: true
+    };
+
+    setLookupResult({
+      status: 'success',
+      defaultComic: manualComic,
+      variants: [manualVariant]
+    });
+
+    setSelectedVariant(manualVariant);
+
+    // Initialize editedData with blank/default fields including image_url
+    setEditedData({
+      title: '',
+      description: '',
+      ipn_proposed: '',
+      image_url: '' // Allows user to paste custom Image URL
+    });
+    setEditedUPC(barcodeInput.trim());
+
+    setListedOnWhatnot(true);
+    setWhatnotAuctionPrice('');
+    setSelectedCategory(null);
+    setStockLocation(null);
+  };
+
+  const handleSavePart = async (mode: 'update-existing' | 'create-variant') => {
     setLoading(true);
     setError(null);
 
-    // Access comic_data instead of defaultComic
-    const comicBase = lookupResult.comic_data;
-    if (!comicBase) {
-      setError('Comic data is missing from the lookup result.');
-      setLoading(false);
-      return;
-    }
-
-    const active = {
-      ...comicBase,
-      title: editedData.title ?? selectedVariant.display_name,
-      description: truncateDescription(
-        editedData.description ?? selectedVariant.description
-      ),
-      image_url: editedData.image_url ?? selectedVariant.image_url,
-      variant: selectedVariant.variant,
-      metron_id: selectedVariant.metron_id
-    };
-
-    let partPk: number | null =
-      mode === 'update-existing' ? existingPartPk : null;
-    const finalIpn =
-      mode === 'create-variant'
-        ? getVariantIpn(comicBase.ipn_proposed, selectedVariant.variant)
-        : comicBase.ipn_proposed;
-
     try {
-      const pubCode = determinePublisherCode(
-        active.publisher,
-        lookupResult.scannedBarcode
-      );
-      const stockLocation = determineStockLocation(pubCode);
-      const finalCategory = determineCategory(pubCode);
+      const active = selectedVariant || lookupResult?.defaultComic;
+      if (!active) throw new Error('No active comic selected.');
 
-      if (!partPk) {
-        const createRes = await context.api.post('/api/part/', {
-          name: active.title,
-          IPN: finalIpn,
-          description: active.description,
-          units: 'each',
-          category: finalCategory,
-          active: true,
-          stock_location: stockLocation,
-          remote_image: active.image_url || undefined
-        });
+      // --- 1. Compute IPN & Image ---
+      const proposedIpn =
+        editedData.ipn_proposed ??
+        lookupResult?.defaultComic?.ipn_proposed ??
+        '';
+      const finalIpn = proposedIpn.trim() || undefined;
+      const finalImageUrl = editedData.image_url ?? active.image_url;
+
+      let partPk = existingPartPk;
+
+      // --- 2. Create or Update Part Payload ---
+      if (mode === 'create-variant' || !partPk) {
+        const payload: Record<string, any> = {
+          name: editedData.title ?? active.title,
+          description: truncateDescription(
+            editedData.description || active.description || ''
+          ),
+          category:
+            selectedCategory ??
+            determineCategory(active.publisher, active.title) ??
+            1
+        };
+
+        if (finalIpn) payload.IPN = finalIpn;
+        if (finalImageUrl) payload.remote_image = finalImageUrl;
+
+        if (createStock && initialQuantity !== null) {
+          payload.initial_stock = {
+            quantity: initialQuantity,
+            location:
+              stockLocation ??
+              determineStockLocation(active.publisher) ??
+              undefined
+          };
+        }
+
+        const createRes = await context.api.post('/api/part/', payload);
         partPk = createRes.data.pk;
-      }
-
-      if (partPk) {
-        await ensureParameter(context, partPk, 'Condition', selectedCondition);
-        await ensureParameter(
-          context,
-          partPk,
-          'Listed on WhatNot',
-          listedOnWhatnot,
-          true
-        );
-        if (whatnotAuctionPrice) {
-          await ensureParameter(
-            context,
-            partPk,
-            'WhatNot Auction Price',
-            whatnotAuctionPrice
+      } else {
+        // PATCH Existing Part
+        const patchPayload: Record<string, any> = {};
+        if (editedData.title) patchPayload.name = editedData.title;
+        if (editedData.description)
+          patchPayload.description = truncateDescription(
+            editedData.description
           );
+        if (finalIpn) patchPayload.IPN = finalIpn;
+        if (finalImageUrl) patchPayload.remote_image = finalImageUrl;
+
+        if (Object.keys(patchPayload).length > 0) {
+          await context.api.patch(`/api/part/${partPk}/`, patchPayload);
+        }
+
+        // Add standalone stock if requested on an existing part
+        if (createStock && initialQuantity !== null) {
+          await context.api.post('/api/stock/', {
+            part: partPk,
+            quantity: initialQuantity,
+            location:
+              stockLocation ??
+              determineStockLocation(active.publisher) ??
+              undefined
+          });
         }
       }
 
+      if (!partPk) throw new Error('Failed to resolve Part Primary Key.');
+
+      // --- 3. Parameters Updates ---
+
+      // Save "Listed on WhatNot" Parameter
+      await ensureParameter(
+        partPk,
+        'Listed on WhatNot',
+        listedOnWhatnot,
+        true,
+        11
+      );
+
+      // Save "WhatNot Auction Price"
+      const price = whatnotAuctionPrice.trim();
+      if (price) {
+        await ensureParameter(
+          partPk,
+          'WhatNot Auction Price',
+          price,
+          false,
+          21
+        );
+      }
+
+      // Save "Condition"
+      if (selectedCondition) {
+        await ensureParameter(
+          partPk,
+          'Condition',
+          selectedCondition,
+          false,
+          16
+        );
+      }
+
+      // Save "Store Date" (Only if toggle enabled and value present)
+      if (includeStoreDate && storeDate) {
+        await ensureParameter(partPk, 'In Stock Date', storeDate, false, 68);
+      }
+
       notifications.show({
-        title: mode === 'update-existing' ? 'Part Updated' : 'Variant Created',
+        title:
+          mode === 'update-existing' ? 'Part Updated' : 'New Variant Created',
         message: `${active.title} saved successfully.`,
         color: 'green',
-        icon: <IconCheck />
+        icon: <IconCheck />,
+        autoClose: 12000
       });
-    } catch (err: unknown) {
-      const errorObj = err as {
-        response?: { data?: unknown };
-        message?: string;
-      };
-      const apiErr = errorObj?.response?.data || errorObj.message;
+    } catch (err: any) {
+      const apiError = err?.response?.data || err.message;
       setError(
-        typeof apiErr === 'object' ? JSON.stringify(apiErr) : String(apiErr)
+        typeof apiError === 'object'
+          ? JSON.stringify(apiError, null, 2)
+          : apiError
       );
+      notifications.show({
+        title: 'Operation Failed',
+        message:
+          typeof apiError === 'object'
+            ? JSON.stringify(apiError, null, 2)
+            : apiError,
+        color: 'red',
+        autoClose: false
+      });
     } finally {
       setLoading(false);
     }
@@ -184,7 +327,7 @@ export function ComicScannerPanel({
         onBarcodeChange={setBarcodeInput}
         onMetronIdChange={setMetronIdInput}
         onLookup={handleLookupClick}
-        onManualEntry={() => {}}
+        onManualEntry={handleManualEntry}
       />
 
       {loading && <Loader />}
@@ -210,6 +353,8 @@ export function ComicScannerPanel({
             listedOnWhatnot={listedOnWhatnot}
             whatnotPrice={whatnotAuctionPrice}
             selectedCondition={selectedCondition}
+            includeStoreDate={includeStoreDate}
+            storeDate={storeDate}
             loading={loading}
             existingPartPk={existingPartPk}
             onEditChange={(f, v) =>
@@ -221,6 +366,8 @@ export function ComicScannerPanel({
             onWhatnotChange={setListedOnWhatnot}
             onWhatnotPriceChange={setWhatnotAuctionPrice}
             onConditionChange={setSelectedCondition}
+            onIncludeStoreDateChange={setIncludeStoreDate}
+            onStoreDateChange={setStoreDate}
             onUpdateExisting={() => handleSavePart('update-existing')}
             onCreateNewVariant={() => handleSavePart('create-variant')}
           />

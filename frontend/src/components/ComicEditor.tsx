@@ -58,12 +58,18 @@ export function ComicEditor({
   onUpdateExisting,
   onCreateNewVariant
 }: ComicEditorProps) {
+  // 1. Prioritize typed/pasted override URL over the variant cover
+  const displayImageUrl =
+    editedData.image_url !== undefined && editedData.image_url !== ''
+      ? editedData.image_url
+      : selectedVariant?.image_url;
+
   return (
     <Stack style={{ flex: 1 }} gap='md'>
       <Title order={5}>Comic Details</Title>
-      {selectedVariant.image_url && (
-        <Image src={selectedVariant.image_url} h={200} fit='contain' />
-      )}
+
+      {/* 2. Bind the Image component to displayImageUrl for immediate preview */}
+      {displayImageUrl && <Image src={displayImageUrl} h={200} fit='contain' />}
 
       <TextInput
         label='Title / Name'
@@ -82,6 +88,13 @@ export function ComicEditor({
         rows={4}
         value={editedData.description ?? selectedVariant.description}
         onChange={(e) => onEditChange('description', e.currentTarget.value)}
+      />
+
+      <TextInput
+        label='Image URL'
+        placeholder='https://example.com/cover.jpg'
+        value={editedData.image_url ?? selectedVariant?.image_url ?? ''}
+        onChange={(e) => onEditChange('image_url', e.currentTarget.value)}
       />
 
       <Switch
