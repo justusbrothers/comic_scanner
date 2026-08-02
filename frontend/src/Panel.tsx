@@ -89,45 +89,102 @@ export function ComicScannerPanel({
   }
 
   const handleLookupClick = async () => {
+    console.group('🔍 [ComicScanner] handleLookupClick Triggered');
+    console.log('📥 Inputs:', { barcodeInput, metronIdInput });
+
     setLoading(true);
     setError(null);
 
-    try {
-      const res = await context.api.post(
-        '/plugin/comic_scanner/comic-lookup/',
-        {
-          barcode: barcodeInput,
-          metron_id: metronIdInput
-        }
-      );
+    // Optional: Reset previously edited data/IPN so the auto-generation useEffect fires fresh
+    setEditedData({});
 
-      const data = res.data;
+    try {
+      let data = null;
+
+      if (barcodeInput || metronIdInput) {
+        console.log('🚀 Sending API Request to lookup endpoint...');
+
+        try {
+          const res = await context.api.post(
+            '/plugin/comic_scanner/comic-lookup/',
+            {
+              barcode: barcodeInput,
+              metron_id: metronIdInput
+            }
+          );
+
+          data = res.data;
+          console.log('📦 Raw API Response:', data);
+        } catch (err) {
+          console.error('Lookup failed:', err);
+          return;
+        }
+      } else {
+        console.log('ℹ️ Manual entry detected: skipping external lookup.');
+      }
+
+      if (!data) return;
+
       setLookupResult(data);
 
       if (data.comic_data) {
+        console.log('📚 comic_data found:', data.comic_data);
         setListedOnWhatnot(data.comic_data.listed_on_whatnot ?? true);
         if (data.comic_data.whatnot_price) {
           setWhatnotAuctionPrice(String(data.comic_data.whatnot_price));
         }
+      } else {
+        console.log('ℹ️ No comic_data property in response');
       }
 
-      if (data.variants?.length > 0) {
+      if (data.variants && data.variants.length > 0) {
+        console.log(`🎨 ${data.variants.length} variant(s) received`);
+
         const match =
           data.variants.find((v: Variant) => v.is_scanned_match) ||
           data.variants[0];
 
+        console.log('✅ Selected Variant:', {
+          title: match.title,
+          publisher: match.publisher,
+          issue_number: match.issue_number,
+          variant: match.variant,
+          is_scanned_match: match.is_scanned_match
+        });
+
         setSelectedVariant(match);
         setEditedUPC(match.upc || barcodeInput);
+
         // Pre-fill image_url from the selected variant/lookup
-        setEditedData((prev) => ({
-          ...prev,
-          image_url: match.image_url || ''
-        }));
+        setEditedData((prev) => {
+          console.log(
+            '📸 Updating editedData.image_url:',
+            match.image_url || ''
+          );
+          return {
+            ...prev,
+            image_url: match.image_url || ''
+          };
+        });
+      } else {
+        console.warn('⚠️ No variants returned in lookup payload.');
       }
-    } catch (_err: unknown) {
-      // ... error handling
+
+      // Check defaultComic if available
+      if (data.defaultComic) {
+        console.log('📄 defaultComic details:', {
+          title: data.defaultComic.title,
+          publisher: data.defaultComic.publisher,
+          issue_number: data.defaultComic.issue_number,
+          ipn_proposed: data.defaultComic.ipn_proposed
+        });
+      }
+    } catch (err: unknown) {
+      console.error('❌ Error during lookup:', err);
+      // Optional error logging
     } finally {
       setLoading(false);
+      console.groupEnd();
     }
   };
 
@@ -174,24 +231,46 @@ export function ComicScannerPanel({
   };
 
   const handleSavePart = async (mode: 'update-existing' | 'create-variant') => {
+    console.group(`💾 [ComicScanner] handleSavePart Triggered (mode: ${mode})`);
     setLoading(true);
     setError(null);
 
     try {
       const active = selectedVariant || lookupResult?.defaultComic;
+      console.log('👉 Active item state:', active);
+
       if (!active) throw new Error('No active comic selected.');
 
       // --- 1. Compute IPN & Image ---
+      console.group('🏷️ [Step 1] IPN & Image Resolution');
+      console.log('Raw values check:', {
+        'editedData.ipn_proposed': editedData.ipn_proposed,
+        'defaultComic.ipn_proposed': lookupResult?.defaultComic?.ipn_proposed,
+        'editedData.image_url': editedData.image_url,
+        'active.image_url': active.image_url
+      });
+
       const proposedIpn =
         editedData.ipn_proposed ??
         lookupResult?.defaultComic?.ipn_proposed ??
         '';
+
       const finalIpn = proposedIpn.trim() || undefined;
       const finalImageUrl = editedData.image_url ?? active.image_url;
 
+      console.log('Resolved values:', {
+        proposedIpn,
+        finalIpn,
+        finalImageUrl
+      });
+      console.groupEnd();
+
       let partPk = existingPartPk;
+      console.log('Initial existingPartPk:', partPk);
 
       // --- 2. Create or Update Part Payload ---
+      console.group('📦 [Step 2] Part Creation / Patching');
+
       if (mode === 'create-variant' || !partPk) {
         const payload: Record<string, any> = {
           name: editedData.title ?? active.title,
@@ -204,7 +283,12 @@ export function ComicScannerPanel({
             1
         };
 
-        if (finalIpn) payload.IPN = finalIpn;
+        // ✅ FIX: Use lowercase `ipn` (or both `IPN` and `ipn` for API compatibility)
+        if (finalIpn) {
+          payload.ipn = finalIpn;
+          payload.IPN = finalIpn;
+        }
+
         if (finalImageUrl) payload.remote_image = finalImageUrl;
 
         if (createStock && initialQuantity !== null) {
@@ -217,53 +301,75 @@ export function ComicScannerPanel({
           };
         }
 
+        console.log('🚀 POST /api/part/ Payload:', payload);
         const createRes = await context.api.post('/api/part/', payload);
+        console.log('✅ POST /api/part/ Response:', createRes.data);
         partPk = createRes.data.pk;
       } else {
-        // PATCH Existing Part
+        console.log(`PATCHING Existing Part (PK: ${partPk})...`);
         const patchPayload: Record<string, any> = {};
         if (editedData.title) patchPayload.name = editedData.title;
         if (editedData.description)
           patchPayload.description = truncateDescription(
             editedData.description
           );
-        if (finalIpn) patchPayload.IPN = finalIpn;
+
+        // ✅ FIX: Use lowercase `ipn` for PATCH requests
+        if (finalIpn) {
+          patchPayload.ipn = finalIpn;
+          patchPayload.IPN = finalIpn;
+        }
+
         if (finalImageUrl) patchPayload.remote_image = finalImageUrl;
 
+        console.log('🛠️ PATCH Payload:', patchPayload);
+
         if (Object.keys(patchPayload).length > 0) {
-          await context.api.patch(`/api/part/${partPk}/`, patchPayload);
+          const patchRes = await context.api.patch(
+            `/api/part/${partPk}/`,
+            patchPayload
+          );
+          console.log('✅ PATCH Response:', patchRes.data);
+        } else {
+          console.warn('⚠️ PATCH payload was empty! No fields were updated.');
         }
 
         // Add standalone stock if requested on an existing part
         if (createStock && initialQuantity !== null) {
-          await context.api.post('/api/stock/', {
+          const stockPayload = {
             part: partPk,
             quantity: initialQuantity,
             location:
               stockLocation ??
               determineStockLocation(active.publisher) ??
               undefined
-          });
+          };
+          console.log('📦 Creating standalone stock payload:', stockPayload);
+          const stockRes = await context.api.post('/api/stock/', stockPayload);
+          console.log('✅ Stock POST Response:', stockRes.data);
         }
       }
+      console.groupEnd();
 
       if (!partPk) throw new Error('Failed to resolve Part Primary Key.');
 
       // --- 3. Parameters Updates ---
+      console.group('🔧 [Step 3] Parameter Updates');
 
-      // Save "Listed on WhatNot" Parameter
+      console.log('Saving "Listed on WhatNot"...');
       await ensureParameter(
+        context,
         partPk,
         'Listed on WhatNot',
         listedOnWhatnot,
-        true,
-        11
+        true
       );
 
-      // Save "WhatNot Auction Price"
       const price = whatnotAuctionPrice.trim();
       if (price) {
+        console.log('Saving "WhatNot Auction Price":', price);
         await ensureParameter(
+          context,
           partPk,
           'WhatNot Auction Price',
           price,
@@ -272,9 +378,10 @@ export function ComicScannerPanel({
         );
       }
 
-      // Save "Condition"
       if (selectedCondition) {
+        console.log('Saving "Condition":', selectedCondition);
         await ensureParameter(
+          context,
           partPk,
           'Condition',
           selectedCondition,
@@ -283,10 +390,24 @@ export function ComicScannerPanel({
         );
       }
 
-      // Save "Store Date" (Only if toggle enabled and value present)
       if (includeStoreDate && storeDate) {
-        await ensureParameter(partPk, 'In Stock Date', storeDate, false, 68);
+        console.log('Saving "In Stock Date":', storeDate);
+        await ensureParameter(
+          context,
+          partPk,
+          'In Stock Date',
+          storeDate,
+          false,
+          68
+        );
       }
+
+      // sequentialPromises.push(ensureParameter(partData.pk, 'upc', payload.active_upc, false, 64, csrfToken));
+      if (editedUPC) {
+        console.log('Saving "UPC":', editedUPC);
+        await ensureParameter(context, partPk, 'upc', editedUPC, false, 64);
+      }
+      console.groupEnd();
 
       notifications.show({
         title:
@@ -297,7 +418,12 @@ export function ComicScannerPanel({
         autoClose: 12000
       });
     } catch (err: any) {
+      console.group('❌ [Error Handler]');
+      console.error('Save failed error object:', err);
       const apiError = err?.response?.data || err.message;
+      console.error('Extracted API Error details:', apiError);
+      console.groupEnd();
+
       setError(
         typeof apiError === 'object'
           ? JSON.stringify(apiError, null, 2)
@@ -314,6 +440,7 @@ export function ComicScannerPanel({
       });
     } finally {
       setLoading(false);
+      console.groupEnd();
     }
   };
 
@@ -382,3 +509,6 @@ export function Panel(context: InvenTreePluginContext) {
 }
 
 export default Panel;
+
+// export const Panel = ComicScannerPanel;
+// export default ComicScannerPanel;
